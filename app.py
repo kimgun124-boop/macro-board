@@ -11,10 +11,10 @@ import view
 
 st.set_page_config(page_title="매크로 시황 보드", page_icon="🌍", layout="wide")
 
-# 탭 묶음: 1~4 시황 해석 · 5~7 시장 데이터 · 8~10 수급·지표 (묶음 색은 theme.py)
+# 탭 묶음: 1~4 판단·해석 · 5~7 시장 데이터 · 8~10 수급·지표 (묶음 색은 theme.py)
 TABS = [
+    ("🎯 비중 판단", view.tab_alloc),
     ("🌐 세계 시황 해석", view.tab_world),
-    ("🧭 오늘의 판단", view.tab_today),
     ("📈 차트 보드", view.tab_charts),
     ("🔗 이슈 ↔ 섹터", view.tab_issues),
     ("📊 지수·금리·위험", view.tab_markets),
@@ -35,7 +35,7 @@ st.markdown(view.CSS, unsafe_allow_html=True)
 theme.apply()    # 🎨 very와 같은 디자인(색·카드·글꼴)
 top = st.columns([6, 1], vertical_alignment="center")
 with top[0]:
-    theme.header("매크로 시황 보드", "사실(지수·수급·외신)로 세계 시황을 읽어요 · 상승 빨강, 하락 파랑", "MACRO")
+    theme.header("매크로 시황 보드", "사실(지수·금리·수급·외신)로 계좌 비중을 정해요 · 상승 빨강, 하락 파랑", "MACRO")
 if top[1].button("새로고침", use_container_width=True):
     load.clear()
 

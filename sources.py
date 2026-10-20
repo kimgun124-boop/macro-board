@@ -79,13 +79,21 @@ def empty() -> pd.DataFrame:
 
 
 # ─────────────────────────── 가짜 데이터(MACRO_MOCK=1) ───────────────────────────
+# 연습용 가짜 시세의 시작값(금리·VIX·유가·환율은 실제와 비슷한 크기로)
+MOCK_BASE = {"^TNX": 4.6, "^FVX": 4.3, "^TYX": 4.9, "^VIX": 19.0, "CL=F": 90.0, "BZ=F": 95.0, "KRW=X": 1390.0,
+             "^IXIC": 26000.0, "^GSPC": 7600.0, "^KS11": 5700.0, "^KQ11": 800.0, "KOSPI": 5700.0, "KOSDAQ": 800.0}
+MOCK_VOL = {"^TNX": 0.008, "^FVX": 0.008, "^TYX": 0.008, "KRW=X": 0.003, "^VIX": 0.04}
+
+
 def mock_history(code: str, count: int = 300) -> pd.DataFrame:
     rng = random.Random(int(hashlib.md5(code.encode()).hexdigest()[:8], 16))
     dates = pd.bdate_range(end=now_kst().date(), periods=count)
-    price, drift, rows = rng.uniform(20, 5_000), rng.uniform(-0.001, 0.002), []
+    price, drift, rows = MOCK_BASE.get(code) or rng.uniform(20, 5_000), rng.uniform(-0.001, 0.002), []
+    if code in MOCK_VOL:
+        drift = 0.0
     for _ in dates:
         o = price
-        price = max(1.0, price * (1 + rng.gauss(drift, 0.015)))
+        price = max(1.0, price * (1 + rng.gauss(drift, MOCK_VOL.get(code, 0.015))))
         hi, lo = max(o, price) * (1 + abs(rng.gauss(0, .006))), min(o, price) * (1 - abs(rng.gauss(0, .006)))
         rows.append((round(o, 2), round(hi, 2), round(lo, 2), round(price, 2), int(rng.uniform(1e5, 1e7))))
     df = pd.DataFrame(rows, columns=COLUMNS[1:])

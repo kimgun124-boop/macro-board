@@ -85,3 +85,57 @@ def line(df: pd.DataFrame, title: str = "", color: str = "#2C5282", height: int 
                       margin=dict(l=4, r=4, t=30 if title else 6, b=4), plot_bgcolor="#FFFFFF",
                       paper_bgcolor="#FFFFFF", font=FONT, hovermode="x")
     return theme.style_fig(fig)
+
+
+def gauge(score: float, bands: list, height: int = 230) -> go.Figure:
+    """비중 점수 반원 게이지. bands = alloc.BANDS(하한, 이름, 비중, 색, 설명)."""
+    lows = sorted(b[0] for b in bands)
+    steps = [dict(range=[lo, (lows + [100])[i + 1]], color=next(b[3] for b in bands if b[0] == lo))
+             for i, lo in enumerate(lows)]
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number", value=round(score), number=dict(suffix="점", font=dict(size=40, color="#111827")),
+        gauge=dict(axis=dict(range=[0, 100], tickvals=lows[1:] + [100], tickfont=dict(size=11)),
+                   bar=dict(color="rgba(17,24,39,.85)", thickness=0.22),
+                   steps=[dict(s, color=s["color"] + "55") for s in steps], borderwidth=0,
+                   threshold=dict(line=dict(color="#111827", width=3), thickness=0.9, value=score))))
+    fig.update_layout(height=height, margin=dict(l=18, r=18, t=10, b=0), paper_bgcolor="#FFFFFF", font=FONT)
+    return theme.style_fig(fig)
+
+
+def score_history(h: pd.DataFrame, bands: list, height: int = 430) -> go.Figure:
+    """위: 비중 점수(구간 색 띠) · 아래: 코스피·나스닥(시작=100)."""
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.06, row_heights=[0.55, 0.45])
+    lows = sorted(b[0] for b in bands)
+    for i, lo in enumerate(lows):
+        b = next(x for x in bands if x[0] == lo)
+        fig.add_hrect(y0=lo, y1=(lows + [100])[i + 1], fillcolor=b[3], opacity=0.08, line_width=0, row=1, col=1)
+        fig.add_annotation(x=1, xref="x domain", y=(lo + (lows + [100])[i + 1]) / 2, yref="y", text=f"{b[1]} {b[2]}",
+                           showarrow=False, xanchor="right", font=dict(size=10, color=b[3]))
+    fig.add_trace(go.Scatter(x=h["date"], y=h["score"], mode="lines", name="비중 점수", line=dict(color="#5B47F5", width=2),
+                             hovertemplate="%{x|%Y-%m-%d} 점수 %{y:.0f}<extra></extra>"), row=1, col=1)
+    for k, nm, col in (("kospi", "코스피", UP), ("nasdaq", "나스닥", "#111827")):
+        if k in h and h[k].notna().any():
+            s = h[k] / h[k].dropna().iloc[0] * 100
+            fig.add_trace(go.Scatter(x=h["date"], y=s, mode="lines", name=nm, line=dict(color=col, width=1.5),
+                                     hovertemplate=f"{nm} %{{y:.1f}}<extra></extra>"), row=2, col=1)
+    fig.update_yaxes(range=[0, 100], row=1, col=1, side="right", gridcolor="#EEF1F3")
+    fig.update_yaxes(row=2, col=1, side="right", gridcolor="#EEF1F3", title=dict(text="시작=100", font=dict(size=10)))
+    fig.update_xaxes(showgrid=False)
+    fig.update_layout(height=height, margin=dict(l=4, r=4, t=10, b=6), hovermode="x unified", plot_bgcolor="#FFFFFF",
+                      paper_bgcolor="#FFFFFF", font=FONT, legend=dict(orientation="h", y=1.04, x=0))
+    return theme.style_fig(fig)
+
+
+def group_bars(groups: dict, height: int = 200) -> go.Figure:
+    """묶음별 점수율(받은 점수 / 만점)."""
+    names = list(groups)
+    got = [(groups[n][0] or 0) / groups[n][1] * 100 if groups[n][1] and groups[n][0] is not None else 0 for n in names]
+    cols = [UP if v >= 65 else "#B7791F" if v >= 45 else DOWN for v in got]
+    txt = [f"{groups[n][0]:.0f}/{groups[n][1]}" if groups[n][0] is not None else "—" for n in names]
+    fig = go.Figure(go.Bar(x=got, y=names, orientation="h", marker_color=cols, text=txt, textposition="outside",
+                           hovertemplate="%{y} %{x:.0f}%<extra></extra>"))
+    fig.update_xaxes(range=[0, 128], visible=False)
+    fig.update_yaxes(autorange="reversed")
+    fig.update_layout(height=height, margin=dict(l=4, r=4, t=4, b=4), plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
+                      font=FONT, bargap=0.35)
+    return theme.style_fig(fig)

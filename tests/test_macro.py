@@ -129,3 +129,21 @@ def test_fallback_parsers():
     assert df["value"].tolist() == [320.1, 321.0]
     csv = "Date,1 Mo,2 Yr,10 Yr\n10/17/2026,4.1,3.5,4.0\n10/16/2026,4.1,3.6,4.1\n"
     assert sources.parse_treasury_csv(csv, "10 Yr")["value"].tolist() == [4.0, 4.1]
+
+
+def test_alloc():
+    import alloc
+    import flows
+    assert alloc.p_rate(5.15) == 0 and alloc.p_rate(4.2) == 15
+    assert alloc.band(88)["name"] == "공격" and alloc.band(40)["name"] == "축소" and alloc.band(10)["name"] == "방어"
+    snap = macro.snapshot()
+    fl = flows.fetch_investor_flows(flows.fetch_market_overview())
+    a = alloc.build(snap, fl)
+    assert 0 <= a["score"] <= 100 and len(a["signals"]) == 12
+    assert a["split"]["kr"] + a["split"]["us"] == 100
+    # 10년물 5% 이상이면 '축소' 위로 못 가요
+    hot = {**snap, "fred": {**snap["fred"], "DGS10": {**snap["fred"]["DGS10"], "last": 5.15}}}
+    assert alloc.build(hot, fl)["score"] <= 49
+    h = alloc.history(snap)
+    assert not h.empty and h["score"].between(0, 100).all()
+    assert alloc.band_stats(h)

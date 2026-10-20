@@ -7,6 +7,7 @@ import pandas as pd
 import streamlit as st
 
 import ai
+import alloc
 import charts
 import corr
 import flows
@@ -41,7 +42,7 @@ CSS = """
 .st-key-main_tabs [role="tab"]::before {
   position: absolute; top: 0.2rem; left: 0.85rem; font-size: 0.64rem; font-weight: 800;
   letter-spacing: 0.02em; color: var(--gc); white-space: nowrap; content: ""; z-index: 2; }
-.st-key-main_tabs [role="tab"]:nth-child(1)::before { content: "시황 해석"; }
+.st-key-main_tabs [role="tab"]:nth-child(1)::before { content: "판단·해석"; }
 .st-key-main_tabs [role="tab"]:nth-child(5)::before { content: "시장 데이터"; }
 .st-key-main_tabs [role="tab"]:nth-child(8)::before { content: "수급·지표"; }
 .st-key-main_tabs [role="tab"] p { color: #3A4852; font-size: 0.98rem !important; }
@@ -98,6 +99,20 @@ CSS = """
 .rep-top{display:flex;justify-content:space-between;align-items:center;gap:.5rem;flex-wrap:wrap}
 .rep-t{font-size:1.35rem;font-weight:900;color:var(--ink);letter-spacing:-.03em;margin:.2rem 0}
 .rep-lead{font-size:1rem;font-weight:600;color:#26343E;background:var(--pri-soft);border-radius:12px;padding:.6rem .85rem;margin:.5rem 0 0}
+.st-key-rep_body h2{font-size:1.08rem !important;font-weight:800;margin:1rem 0 .35rem;padding:0;border-left:4px solid var(--pri);padding-left:.5rem}
+.st-key-rep_body table{width:100%;font-size:.88rem;font-variant-numeric:tabular-nums}
+.st-key-rep_body th{background:#F7F7FB;color:var(--sub);font-weight:600}
+.st-key-rep_body li, .st-key-rep_body p{font-size:.92rem;line-height:1.65}
+.al-cap{margin-top:.45rem;font-size:.84rem;font-weight:700;color:#A2343B;background:#FBE9EA;border-radius:8px;padding:.35rem .6rem}
+.al-split-t{font-size:.86rem;font-weight:800;color:var(--ink);margin:2px 0 6px}
+.al-split{display:flex;height:34px;border-radius:10px;overflow:hidden;font-size:.86rem;font-weight:800;color:#fff}
+.al-split div{display:flex;align-items:center;justify-content:center;white-space:nowrap;min-width:3.5rem}
+.al-lines div{margin:2px 0}
+.al-k{display:inline-block;font-size:.74rem;font-weight:800;border-radius:6px;padding:.05rem .45rem;margin-right:.45rem}
+.al-pts{display:flex;align-items:center;gap:6px;justify-content:flex-end}
+.al-pts span{color:#8A979F;font-size:.75rem}
+.al-track{width:70px;height:8px;background:#EEF0F6;border-radius:99px;overflow:hidden}
+.al-track div{height:100%;border-radius:99px}
 .stApp [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stPlotlyChart"] { border: none; box-shadow: none; padding: 0; }
 @media (max-width: 640px) {
   .idx-row { gap: 0.35rem; grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -136,7 +151,8 @@ def _ma(s) -> str:
 
 
 def _table(head: list[str], rows: list[list[str]], left: int = 1) -> str:
-    th = "".join(f'<th class="{"l" if i < left else ""}">{h}</th>' for i, h in enumerate(head))
+    notes = {i for i, c in enumerate(rows[0]) if str(c).startswith("§")} if rows else set()
+    th = "".join(f'<th class="{"l" if i < left or i in notes else ""}">{h}</th>' for i, h in enumerate(head))
     body = "".join("<tr>" + "".join(f'<td class="{"l" if i < left else ("note" if c.startswith("§") else "")}">{c.lstrip("§")}</td>'
                                     for i, c in enumerate(r)) + "</tr>" for r in rows)
     return f'<div class="mc-wrap"><table class="mc-t"><thead><tr>{th}</tr></thead><tbody>{body}</tbody></table></div>'
@@ -320,9 +336,7 @@ def tab_news(snap: dict) -> None:
             unsafe_allow_html=True)
 
 
-# ═══════════════════════════ 오늘의 판단(추세추종 + AI) ═══════════════════════════
-LEVEL = {"good": ("●", UP), "warn": ("●", "#B7791F"), "bad": ("●", DOWN), "info": ("●", FLAT)}
-TONE_BG = {"good": "#FDECEC", "warn": "#FFF6E5", "bad": "#E8F0FB"}
+# ═══════════════════════════ 비중 판단(첫 탭) + AI ═══════════════════════════
 
 
 @st.cache_data(ttl=3600, show_spinner=False, max_entries=30)
@@ -352,36 +366,127 @@ def _ai_block(key: str, context: str, question: str, label: str) -> None:
     st.caption("AI 해설은 해석이에요. '사실'로 표시된 것도 링크 원문을 꼭 확인하세요. 투자 권유가 아니에요.")
 
 
-def tab_today(snap: dict) -> None:
-    v = trend.market_view(snap)
-    vc = {"good": UP, "warn": "#E0672B", "bad": DOWN}[v["tone"]]
-    st.markdown(
-        f'<div class="verdict" style="--vc:{vc}"><div class="v-top"><span class="v-lab">추세추종 판단</span>'
-        f'<span>점수 {v["score"]:+d} · {snap["at"]:%m/%d %H:%M}</span></div>'
-        f'<div class="v-title">{html.escape(v["verdict"])}</div><div class="v-act">{html.escape(v["say"])}</div></div>',
-        unsafe_allow_html=True)
-    st.markdown('<div class="mc-sum">' + "".join(
-        f'<div style="margin:3px 0"><span style="color:{LEVEL[x["level"]][1]}">{LEVEL[x["level"]][0]}</span> '
-        f'{html.escape(x["text"])}</div>' for x in v["lines"]) + "</div>", unsafe_allow_html=True)
-    st.caption("빨강 = 좋은 신호, 노랑 = 주의, 파랑 = 나쁜 신호, 회색 = 참고. 규칙은 보내 주신 블로그(버터대디·미너비니 등)의 "
-               "추세추종 기준을 숫자로 옮긴 거예요(10일선 회복, 50일선 중심선, 200일선 사나이테스트, 나스닥 -3%, 10년물 5%). "
-               "판단 문구는 규칙의 결과일 뿐 투자 권유가 아니에요.")
+@st.cache_data(ttl=15 * 60, show_spinner=False)
+def _alloc_hist(at: str, _snap: dict) -> pd.DataFrame:
+    """과거 점수(15분 캐시). at = 스냅샷 시각(캐시 키)."""
+    try:
+        ten = S.fred("DGS10", days=1000)
+    except Exception:  # noqa: BLE001
+        ten = None
+    return alloc.history(_snap, ten)
 
+
+def _pts_bar(s: dict) -> str:
+    if s["pts"] is None:
+        return '<span style="color:#9AA5AE">—</span>'
+    r = s["pts"] / s["max"]
+    col = UP if r >= 0.7 else "#B7791F" if r >= 0.4 else DOWN
+    return (f'<div class="al-pts"><div class="al-track"><div style="width:{r * 100:.0f}%;background:{col}"></div></div>'
+            f'<b style="color:{col}">{s["pts"]:g}</b><span>/{s["max"]}</span></div>')
+
+
+def _tilt_table(rows: list[dict]) -> str:
+    if not rows:
+        return '<div class="mc-legend">해당 없음</div>'
+    body = [[f'{html.escape(r["name"])} <span style="color:#8A979F;font-size:.75rem">{r["where"]}</span>',
+             f'<span class="mc-chip" style="color:{trend.STAGE_COLOR.get(r["stage"].split("(")[0], FLAT)};'
+             f'border-color:{trend.STAGE_COLOR.get(r["stage"].split("(")[0], FLAT)}">{html.escape(r["stage"])}</span>',
+             _p(r["rel"], 1), _p(r["from_high"], 1)] for r in rows]
+    return _table(["섹터·종목", "추세", "20일 상대", "고점 대비"], body)
+
+
+def tab_alloc(snap: dict) -> None:
+    _, fl = _flows()
+    a = alloc.build(snap, fl)
+    b, sp = a["band"], a["split"]
+    got, tot = a["coverage"]
+
+    c1, c2, c3 = st.columns([1.25, 1, 1], vertical_alignment="center")
+    with c1:
+        cap = "".join(f'<div class="al-cap">⛔ {html.escape(t)}</div>' for _, t in a["caps"])
+        st.markdown(
+            f'<div class="verdict" style="--vc:{b["color"]}"><div class="v-top"><span class="v-lab">계좌 비중 판단</span>'
+            f'<span>신호 {got}/{tot}개 · {snap["at"]:%m/%d %H:%M}</span></div>'
+            f'<div class="v-title">{b["name"]} · 주식 {b["equity"]}</div>'
+            f'<div class="v-act">{html.escape(b["say"])}</div>{cap}</div>', unsafe_allow_html=True)
+    with c2:
+        st.plotly_chart(charts.gauge(a["score"], alloc.BANDS), key="al_gauge", config={"displayModeBar": False})
+        if a["caps"] and a["raw"] > a["score"] + 0.5:
+            st.markdown(f'<div class="mc-legend" style="text-align:center">신호만 더하면 {a["raw"]:.0f}점 → 레드라인 상한 {a["score"]:.0f}점</div>',
+                        unsafe_allow_html=True)
+    with c3:
+        rel = sp.get("rel20")
+        st.markdown(
+            f'<div class="al-split-t">주식 안에서 나누기</div><div class="al-split">'
+            f'<div style="width:{sp["kr"]}%;background:{UP}">한국 {sp["kr"]}%</div>'
+            f'<div style="width:{sp["us"]}%;background:#111827">미국 {sp["us"]}%</div></div>'
+            f'<div class="mc-legend" style="margin:4px 0 8px">한국 신호 {0 if sp["kr_rate"] is None else sp["kr_rate"] * 100:.0f}점 · '
+            f'미국 신호 {0 if sp["us_rate"] is None else sp["us_rate"] * 100:.0f}점'
+            + (f' · 20일 코스피−나스닥 {rel:+.1f}%p' if rel is not None else "") + "</div>", unsafe_allow_html=True)
+        st.plotly_chart(charts.group_bars(a["groups"], height=170), key="al_groups", config={"displayModeBar": False})
+
+    # 한 줄씩: 끌어내린 것 · 받쳐 준 것 · 오늘 해석
+    drag = " · ".join(f'{html.escape(s["name"])} {html.escape(s["value"])} ({s["pts"]:g}/{s["max"]})' for s in a["drag"]) or "없음"
+    sup = " · ".join(f'{html.escape(s["name"])} {html.escape(s["value"])} ({s["pts"]:g}/{s["max"]})' for s in a["support"]) or "없음"
+    reps = report.all_reports()
+    lead = f'<div><span class="al-k" style="background:#EFEDFF;color:#4532D9">오늘 해석</span>{html.escape(reps[0]["lead"])} ' \
+           f'<span style="color:#8A979F;font-size:.78rem">({reps[0]["when"]}, 🌐 탭)</span></div>' if reps and reps[0]["lead"] else ""
+    st.markdown(f'<div class="mc-sum al-lines"><div><span class="al-k" style="background:#E8EEF8;color:{DOWN}">끌어내림</span>{drag}</div>'
+                f'<div><span class="al-k" style="background:#FBE9EA;color:{UP}">받쳐 줌</span>{sup}</div>{lead}</div>',
+                unsafe_allow_html=True)
+
+    _sec("비중이 바뀌는 조건", "점수가 가장 많이 오르는 순서")
+    if a["triggers"]:
+        st.markdown('<div class="idx-row" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr))">' + "".join(
+            f'<div class="idx"><div class="idx-name">{html.escape(nm)}</div><div class="idx-val" style="font-size:1rem">'
+            f'{html.escape(t)}</div><span class="idx-badge on">+{g}점</span></div>' for t, g, nm in a["triggers"]) + "</div>",
+            unsafe_allow_html=True)
+    else:
+        st.caption("모든 신호가 만점 근처예요.")
+
+    _sec("신호 12개", "점수 = 보내 주신 블로그 기준을 숫자로 옮긴 것")
+    rows = [[f'<span style="color:#8A979F">{s["group"]}</span>', f'<b>{html.escape(s["name"])}</b>', html.escape(s["value"]),
+             _pts_bar(s), "§" + html.escape(s["why"]), "§" + html.escape(s["next"] or "—")] for s in a["signals"]]
+    st.markdown(_table(["묶음", "신호", "지금", "점수", "근거", "좋아지려면"], rows, left=3), unsafe_allow_html=True)
+    st.markdown('<div class="mc-legend">구간: ' + " · ".join(
+        f'<b style="color:{c}">{n}</b> {lo}점+ 주식 {e}' for lo, n, e, c, _ in alloc.BANDS) +
+        ' · 레드라인: 10년물 5% 이상이면 축소 위로 못 감, 나스닥 -3%·전닉 동반 하락이면 중립 위로 못 감</div>',
+        unsafe_allow_html=True)
+
+    _sec("어디에 싣나", "이평선 추세 + 20일 상대 강도(미국은 S&P, 한국은 코스피 대비)")
+    t1, t2 = st.columns(2)
+    with t1:
+        st.markdown('<div class="al-split-t" style="color:#D6333B">강한 쪽 (늘릴 후보)</div>', unsafe_allow_html=True)
+        st.markdown(_tilt_table(a["tilt"]["strong"]), unsafe_allow_html=True)
+    with t2:
+        st.markdown('<div class="al-split-t" style="color:#1F66C9">약한 쪽 (줄일 후보)</div>', unsafe_allow_html=True)
+        st.markdown(_tilt_table(a["tilt"]["weak"]), unsafe_allow_html=True)
     reg = trend.rate_regime(snap["sm"])
     if reg:
-        _sec("금리 국면")
-        secs = sorted([(n, snap["sm"][s]["d20"]) for s, n in C.SECTORS if snap["sm"].get(s) and snap["sm"][s]["d20"] is not None],
-                      key=lambda x: -x[1])
-        now = " · ".join(f"{n} {d:+.1f}%" for n, d in secs[:3]) + "  …  " + " · ".join(f"{n} {d:+.1f}%" for n, d in secs[-3:])
-        st.markdown(
-            f'<div class="mc-sum"><b>{reg["name"]}</b> — 20일 동안 2년물 {reg["d2"]:+.2f}%p, 10년물 {reg["d10"]:+.2f}%p<br>'
-            f'과거 이 국면에서 강했던 섹터(블로그 인용 표): {html.escape(reg["past"] or "표에 없는 국면이에요")}<br>'
-            f'최근 20일 실제 섹터: 강한 쪽 {html.escape(now)}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="mc-legend">금리 국면 <b>{reg["name"]}</b> (20일: 2년물 {reg["d2"]:+.2f}%p, 10년물 {reg["d10"]:+.2f}%p) · '
+                    f'과거 이 국면에 강했던 섹터(블로그 인용): {html.escape(reg["past"] or "표에 없음")}</div>', unsafe_allow_html=True)
 
-    _sec("🤖 AI 시황 해설")
-    st.caption("대시보드 숫자 + 뉴스 + 보내 주신 이미지에서 정리한 지식 노트를 주고, 외신(NYT·WSJ·FT·Reuters·Bloomberg 등)을 "
-               "직접 검색해 사실을 확인한 뒤 이슈와 섹터 반응을 연결해 설명하게 해요.")
-    _ai_block("market", ai.market_context(snap, v, issues.build(snap), reg), ai.MARKET_ASK, "AI 해설 만들기")
+    _sec("점수 흐름", "과거에 이 점수였을 때 지수는 어땠나")
+    h = _alloc_hist(f'{snap["at"]:%Y%m%d%H%M}', snap)
+    if h.empty:
+        st.caption("과거 점수를 계산할 데이터가 부족해요.")
+    else:
+        st.plotly_chart(charts.score_history(h, alloc.BANDS), key="al_hist", config={"displaylogo": False})
+        rows = []
+        for r in alloc.band_stats(h):
+            if not r["days"]:
+                continue
+            f = lambda v, w: "—" if v is None else f'{_p(v, 1)} <span style="color:#8A979F;font-size:.75rem">오른 날 {w:.0f}%</span>'
+            rows.append([f'<b style="color:{r["color"]}">{r["band"]}</b> <span style="color:#8A979F">주식 {r["equity"]}</span>',
+                         f'{r["days"]}일', f(r["kospi"], r["kospi_win"]), f(r["nasdaq"], r["nasdaq_win"])])
+        st.markdown(_table(["점수 구간", "머문 날", "그 뒤 20일 코스피", "그 뒤 20일 나스닥"], rows), unsafe_allow_html=True)
+        st.caption(f'{h["date"].iloc[0]:%Y-%m-%d}부터. 과거 점수는 하이일드·외국인 수급 없이 계산해요. 과거 결과가 미래를 보장하진 않아요.')
+
+    if ai.api_key():
+        with st.expander("🤖 AI 시황 해설 (API 요금 별도)"):
+            _ai_block("market", ai.market_context(snap, trend.market_view(snap), issues.build(snap), reg), ai.MARKET_ASK,
+                      "AI 해설 만들기")
+    st.caption("점수는 규칙의 결과예요. 투자 권유가 아니에요.")
 
 
 # ═══════════════════════════ 차트 보드 ═══════════════════════════
@@ -571,7 +676,7 @@ def tab_world(snap: dict) -> None:
                     f'<div class="rep-t">{html.escape(pick["title"])}</div>'
                     + (f'<div class="rep-lead">{html.escape(pick["lead"])}</div>' if pick["lead"] else "") + "</div>",
                     unsafe_allow_html=True)
-        with st.container(border=True):
+        with st.container(border=True, key="rep_body"):
             st.markdown("\n".join(l for l in report.body(pick["text"]).splitlines() if not l.startswith(">")))
         st.caption("Claude가 지수·수급·외신을 출처 2곳 이상 맞춰 보고 쓴 글이에요. [사실]은 숫자·보도, [해석]은 Claude의 판단, "
                    "[블로그 관점]은 보내 주신 사진의 관점이에요. 투자 권유가 아니에요.")
