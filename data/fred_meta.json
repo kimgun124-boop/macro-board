@@ -1,0 +1,28 @@
+{
+ "at": "2026-10-20T07:26:32Z",
+ "src": {
+  "CPIAUCSL": "DBnomics(BLS)",
+  "CPILFESL": "DBnomics(BLS)",
+  "PAYEMS": "DBnomics(BLS)",
+  "UNRATE": "DBnomics(BLS)",
+  "UMCSENT": "미시간대",
+  "MORTGAGE30US": "프레디맥",
+  "T10YIE": "미 재무부",
+  "DFII10": "미 재무부",
+  "T10Y2Y": "미 재무부",
+  "DGS2": "미 재무부",
+  "DGS5": "미 재무부",
+  "DGS10": "미 재무부",
+  "DGS30": "미 재무부"
+ },
+ "missing": [
+  "PCEPILFE",
+  "ICSA",
+  "RSAFS",
+  "INDPRO",
+  "A191RL1Q225SBEA",
+  "DFF",
+  "BAMLH0A0HYM2",
+  "BAMLC0A4CBBB"
+ ]
+}
