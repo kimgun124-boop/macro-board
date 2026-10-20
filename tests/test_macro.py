@@ -60,7 +60,7 @@ def test_app_runs():
     from streamlit.testing.v1 import AppTest
     at = AppTest.from_file("../app.py", default_timeout=60).run()
     assert not at.exception
-    assert len(at.tabs) == 7
+    assert len(at.tabs) == 10
 
 
 def test_trend_stages():
@@ -100,3 +100,32 @@ def test_ai_without_key(monkeypatch):
     ctx = ai.market_context(snap, trend.market_view(snap), issues.build(snap), trend.rate_regime(snap["sm"]))
     assert "S&P 500" in ctx
     assert ai.ask(ctx, "test")["error"]
+
+
+def test_reports(tmp_path, monkeypatch):
+    import report
+    monkeypatch.setattr(report, "DIR", tmp_path)
+    (tmp_path / "2026-10-20-0752.md").write_text("# 제목\n> 요약\n\n본문", encoding="utf-8")
+    (tmp_path / "2026-10-20-1952.md").write_text("# 밤\n> 밤 요약\n\n본문", encoding="utf-8")
+    r = report.all_reports()
+    assert r[0]["title"] == "밤" and r[0]["lead"] == "밤 요약" and r[0]["when"] == "2026-10-20 19:52"
+    assert report.body(r[0]["text"]).startswith(">")
+
+
+def test_corr_and_flows():
+    import corr, flows
+    px = corr.fetch_long()
+    t = corr.table(px)
+    assert t and t[0]["cells"]["1년"]["corr"] is not None
+    assert t[0]["cells"]["10년"] is not None
+    assert not corr.recent_days(px).empty
+    ov = flows.fetch_market_overview()
+    fl = flows.fetch_investor_flows(ov)
+    assert ov["코스피"]["deal"] and not fl["코스닥"].empty
+
+
+def test_fallback_parsers():
+    df = sources.parse_dbnomics({"series": {"docs": [{"period": ["2026-08", "2026-09"], "value": [320.1, 321.0]}]}})
+    assert df["value"].tolist() == [320.1, 321.0]
+    csv = "Date,1 Mo,2 Yr,10 Yr\n10/17/2026,4.1,3.5,4.0\n10/16/2026,4.1,3.6,4.1\n"
+    assert sources.parse_treasury_csv(csv, "10 Yr")["value"].tolist() == [4.0, 4.1]

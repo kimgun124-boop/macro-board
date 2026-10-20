@@ -8,6 +8,9 @@ import streamlit as st
 
 import ai
 import charts
+import corr
+import flows
+import report
 import config as C
 import econ
 import issues
@@ -18,27 +21,91 @@ import trend
 UP, DOWN, FLAT = "#D6333B", "#1F66C9", "#51616C"     # 한국식: 상승 빨강, 하락 파랑
 CHIP = {"교차확인": "#1D7A4C", "단일출처": "#51616C", "상충": "#B7791F", "주장": "#C53030", "의견": "#7B5EA7", "없음": "#9AA5AE"}
 
+# 밸류체인 신고가 보드(very)의 기본 스타일을 그대로 가져왔어요. 색·카드·탭 모양은 theme.py(very와 같은 파일)가 덮어써요.
 CSS = """
 <style>
-.mc-sum{background:#fff;border:1px solid #DCE3E7;border-radius:10px;padding:12px 14px;margin:4px 0 14px;line-height:1.7}
-.mc-sum b{font-weight:600}
-.mc-wrap{overflow-x:auto;margin-bottom:6px}
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css');
+.stApp, .stApp p, .stApp label, .stApp h1, .stApp h2, .stApp h3, .stMarkdown {
+  font-family: 'Pretendard Variable', Pretendard, 'Malgun Gothic', sans-serif;
+}
+.stApp h1 { font-weight: 800; letter-spacing: -0.025em; }
+.status { color: #51616C; font-size: 0.88rem; margin: -0.4rem 0 0.9rem; }
+/* 메인 탭 3묶음(very와 같은 방식): 시황 해석 · 시장 데이터 · 경제지표 */
+.st-key-main_tabs [role="tablist"] { gap: 0.3rem; border-bottom: 2px solid #DCE3E7; padding-bottom: 0; }
+.st-key-main_tabs [role="tab"] {
+  position: relative; --gc: #51616C; --gt: #F1F4F6;
+  background: var(--gt); border: 1px solid #E3E8EB; border-top: 3px solid var(--gc); border-bottom: none;
+  border-radius: 8px 8px 0 0; padding: 1.15rem 0.85rem 0.45rem !important; overflow: visible !important; }
+.st-key-main_tabs [role="tab"]:nth-child(5),
+.st-key-main_tabs [role="tab"]:nth-child(8) { margin-left: 0.9rem; }
+.st-key-main_tabs [role="tab"]::before {
+  position: absolute; top: 0.2rem; left: 0.85rem; font-size: 0.64rem; font-weight: 800;
+  letter-spacing: 0.02em; color: var(--gc); white-space: nowrap; content: ""; z-index: 2; }
+.st-key-main_tabs [role="tab"]:nth-child(1)::before { content: "시황 해석"; }
+.st-key-main_tabs [role="tab"]:nth-child(5)::before { content: "시장 데이터"; }
+.st-key-main_tabs [role="tab"]:nth-child(8)::before { content: "수급·지표"; }
+.st-key-main_tabs [role="tab"] p { color: #3A4852; font-size: 0.98rem !important; }
+.st-key-main_tabs .react-aria-SelectionIndicator, .st-key-main_tabs [data-baseweb="tab-highlight"], .st-key-main_tabs [data-baseweb="tab-border"] { display: none; }
+.st-key-main_tabs [role="tabpanel"] [role="tab"]::before { content: none !important; }
+.sec-h { display: flex; align-items: baseline; justify-content: space-between; gap: 0.6rem; margin: 1rem 0 0.5rem; }
+.sec-h b { font-size: 1.12rem; font-weight: 800; color: #16212B; }
+.sec-h span { font-size: 0.78rem; color: #7A8A94; }
+.verdict { border-left: 6px solid var(--vc); background: #FFFFFF; border-radius: 12px; padding: 0.8rem 1rem;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04); margin-bottom: 0.7rem; }
+.v-top { display: flex; justify-content: space-between; gap: 0.5rem; font-size: 0.76rem; color: #7A8A94; }
+.v-lab { font-weight: 700; letter-spacing: .02em; }
+.v-title { font-size: 1.55rem; font-weight: 900; color: var(--vc); line-height: 1.25; margin-top: 0.1rem; }
+.v-act { font-size: 0.95rem; font-weight: 600; color: #26343E; margin-top: 0.15rem; }
+.idx-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(135px, 1fr)); gap: 0.6rem; margin: 0 0 0.9rem; }
+.idx { background: #FFFFFF; border: 1px solid #DCE3E7; border-radius: 12px; padding: 0.7rem 0.9rem; }
+.idx-name { font-size: 0.85rem; color: #51616C; }
+.idx-name small { margin-left: 0.3rem; color: #8A979F; }
+.idx-val { font-size: 1.15rem; font-weight: 800; color: #16212B; font-variant-numeric: tabular-nums; }
+.idx-chg { display: block; font-size: 0.85rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.idx svg { display: block; width: 100%; height: 28px; margin-top: 0.3rem; }
+.idx-badge { display: inline-block; font-size: 0.72rem; font-weight: 700; padding: 0.1rem 0.45rem;
+  border-radius: 6px; margin-top: 0.25rem; }
+.idx-badge.on { background: var(--pri-soft); color: var(--pri-ink); }
+.idx-badge.off { background: #F4E1E2; color: #A2343B; }
+.idx-badge.neutral { background: #F3F4F8; color: var(--sub); }
+/* 이 보드만의 카드·표 (theme 색 토큰 사용) */
+.mc-sum{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:0.95rem 1.15rem;margin:4px 0 14px;line-height:1.75}
+.mc-sum b{font-weight:700}
+.mc-wrap{overflow-x:auto;margin-bottom:10px;background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
 .mc-t{width:100%;border-collapse:collapse;font-size:.88rem;font-variant-numeric:tabular-nums}
-.mc-t th{color:#51616C;font-weight:500;text-align:right;padding:5px 8px;border-bottom:1px solid #DCE3E7;white-space:nowrap}
-.mc-t td{text-align:right;padding:5px 8px;border-bottom:1px solid #EEF2F4;white-space:nowrap}
+.mc-t th{background:#F7F7FB;color:var(--sub);font-weight:600;text-align:right;padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+.mc-t td{text-align:right;padding:7px 10px;border-bottom:1px solid var(--line2);white-space:nowrap}
+.mc-t tbody tr:hover td{background:#FAF9FF}
 .mc-t .l{text-align:left}
-.mc-t .note{color:#6B7A85;font-size:.78rem;white-space:normal;min-width:12rem;text-align:left}
-.mc-chip{display:inline-block;padding:0 8px;border-radius:999px;border:1px solid;font-size:.75rem;line-height:1.6}
-.mc-legend{font-size:.8rem;color:#51616C;margin:-4px 0 10px}
-.mc-news{border:1px solid #DCE3E7;border-radius:10px;padding:10px 12px;margin-bottom:8px;background:#fff}
-.mc-news .h{font-weight:600;margin:4px 0}
-.mc-news .m{font-size:.78rem;color:#6B7A85}
-.mc-news a{color:inherit}
-.mc-bar{display:grid;grid-template-columns:minmax(7rem,max-content) 1fr 4.5rem;gap:4px 8px;align-items:center;font-size:.85rem}
+.mc-t .note{color:var(--sub);font-size:.78rem;white-space:normal;min-width:12rem;text-align:left}
+.mc-chip{display:inline-block;padding:0 8px;border-radius:999px;border:1px solid;font-size:.75rem;line-height:1.6;background:#fff}
+.mc-legend{font-size:.8rem;color:var(--sub);margin:-4px 0 10px}
+.mc-news{border:1px solid var(--line);border-radius:14px;padding:10px 14px;margin-bottom:8px;background:var(--card);box-shadow:var(--shadow)}
+.mc-news:hover{border-color:#CFC8FF;background:#FAF9FF}
+.mc-news .h{font-weight:700;margin:4px 0}
+.mc-news .m{font-size:.78rem;color:var(--sub)}
+.mc-news a{color:inherit;text-decoration:none}
+.mc-bar{display:grid;grid-template-columns:minmax(7rem,max-content) 1fr 4.5rem;gap:6px 10px;align-items:center;font-size:.86rem;background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:12px 14px}
 .mc-bar .track{position:relative;height:14px}
-.mc-bar .mid{position:absolute;left:50%;top:0;bottom:0;border-left:1px solid #C9D3D9}
-.mc-bar .fill{position:absolute;top:2px;bottom:2px;border-radius:3px}
+.mc-bar .mid{position:absolute;left:50%;top:0;bottom:0;border-left:1px solid #D9DCE8}
+.mc-bar .fill{position:absolute;top:2px;bottom:2px;border-radius:4px}
 .mc-bar .v{text-align:right;font-variant-numeric:tabular-nums}
+.mc-card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:10px 12px 4px;margin-bottom:10px}
+.mc-card .t{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
+.mc-card .s{font-size:.78rem;margin:2px 0 0}
+.mc-card .c{font-size:.78rem;color:var(--sub);margin:2px 0 6px}
+.rep{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow-lg);padding:1.2rem 1.4rem;margin-bottom:1rem}
+.rep-top{display:flex;justify-content:space-between;align-items:center;gap:.5rem;flex-wrap:wrap}
+.rep-t{font-size:1.35rem;font-weight:900;color:var(--ink);letter-spacing:-.03em;margin:.2rem 0}
+.rep-lead{font-size:1rem;font-weight:600;color:#26343E;background:var(--pri-soft);border-radius:12px;padding:.6rem .85rem;margin:.5rem 0 0}
+.stApp [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stPlotlyChart"] { border: none; box-shadow: none; padding: 0; }
+@media (max-width: 640px) {
+  .idx-row { gap: 0.35rem; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .idx { padding: 0.5rem 0.55rem; }
+  .idx-name { font-size: 0.74rem; }
+  .idx-val { font-size: 0.98rem; }
+  .st-key-main_tabs [role="tab"]:nth-child(5), .st-key-main_tabs [role="tab"]:nth-child(8) { margin-left: 0; }
+}
 </style>
 """
 
@@ -90,24 +157,75 @@ def _bars(items: list[tuple[str, float | None]]) -> str:
     return '<div class="mc-bar">' + "".join(rows) + "</div>"
 
 
+def _sec(title: str, sub: str = "") -> None:
+    """very와 같은 제목줄(보라 막대 + 굵은 제목 + 오른쪽 작은 설명)."""
+    st.markdown(f'<div class="sec-h"><b>{html.escape(title)}</b><span>{html.escape(sub)}</span></div>',
+                unsafe_allow_html=True)
+
+
+def _spark(vals: list[float] | None, color: str) -> str:
+    if not vals or len(vals) < 2:
+        return ""
+    lo, hi = min(vals), max(vals)
+    rng = (hi - lo) or 1
+    pts = " ".join(f"{i / (len(vals) - 1) * 100:.1f},{28 - (v - lo) / rng * 26 - 1:.1f}" for i, v in enumerate(vals))
+    return (f'<svg viewBox="0 0 100 28" preserveAspectRatio="none"><polyline points="{pts}" fill="none" '
+            f'stroke="{color}" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg>')
+
+
+# 맨 위 핵심 숫자 카드(very의 지수 카드 모양)
+KPI = [("^GSPC", "S&P 500", "idx"), ("^IXIC", "나스닥", "idx"), ("^KS11", "코스피", "idx"), ("^KQ11", "코스닥", "idx"),
+       ("fred:DGS10", "미 10년물", "rate"), ("KRW=X", "원/달러", "idx"), ("CL=F", "WTI 유가", "idx"), ("^VIX", "VIX", "idx")]
+
+
+def _kpi(snap: dict, key: str, name: str, kind: str) -> str:
+    sm, tr = snap["sm"], snap.get("trend", {})
+    s = (snap["fred"].get("DGS10") or sm.get("^TNX")) if key == "fred:DGS10" else sm.get(key)
+    if not s:
+        return f'<div class="idx"><div class="idx-name">{name}</div><div class="idx-val">—</div></div>'
+    if kind == "rate":
+        v = s.get("a1")
+        chg = "" if v is None else f'<span class="idx-chg" style="color:{_c(v)}">{v:+.3f}%p</span>'
+        val = f'{s["last"]:.3f}%'
+        col = _c(v)
+    else:
+        v = s.get("d1")
+        chg = "" if v is None else f'<span class="idx-chg" style="color:{_c(v)}">{v:+.2f}%</span>'
+        val = f'{s["last"]:,.2f}' if s["last"] < 10000 else f'{s["last"]:,.0f}'
+        col = _c(s.get("d20"))
+    t = tr.get(key)
+    badge = ""
+    if t:
+        cls = "on" if t["stage"] in ("상승 추세", "추세 속 눌림") else ("off" if t["stage"] == "하락 추세" else "neutral")
+        badge = f'<span class="idx-badge {cls}">{t["stage"]}</span>'
+    return (f'<div class="idx"><div class="idx-name">{name}<small>{s["date"]:%m/%d}</small></div>'
+            f'<div class="idx-val">{val}</div>{chg}{badge}{_spark(s.get("spark"), col)}</div>')
+
+
 def header(snap: dict) -> None:
-    st.markdown(CSS, unsafe_allow_html=True)
+    st.markdown('<div class="idx-row">' + "".join(_kpi(snap, *k) for k in KPI) + "</div>", unsafe_allow_html=True)
     lines = macro.facts(snap)
-    st.markdown(f'<div class="mc-sum"><b>숫자로 본 오늘</b> ({snap["at"]:%m/%d %H:%M} 기준)<br>'
-                + " · ".join(html.escape(x) for x in lines) + "</div>", unsafe_allow_html=True)
-    st.markdown('<div class="mc-legend">검증: ' + " ".join(_chip(k) for k in ("교차확인", "단일출처", "상충")) +
-                f" — 야후 종가를 stooq·네이버·FRED와 같은 날짜끼리 맞춰 봐요(차이 {C.TOL}% 안이면 교차확인). "
-                "시세는 15분 안팎 지연이에요.</div>", unsafe_allow_html=True)
+    st.markdown('<div class="mc-legend">' + " · ".join(html.escape(x) for x in lines) + "<br>검증: "
+                + " ".join(_chip(k) for k in ("교차확인", "단일출처", "상충")) +
+                f" 야후 종가를 stooq·네이버·FRED와 같은 날짜끼리 맞춰 봐요(차이 {C.TOL}% 안이면 교차확인). 시세는 15분 안팎 지연이에요.</div>",
+                unsafe_allow_html=True)
+
+
+def _seg(label: str, options: list, key: str, where=None, default=None):
+    """very처럼 알약 버튼 묶음(segmented control). 항상 하나는 선택돼 있어요."""
+    w = where or st
+    return w.segmented_control(label, options, default=default if default is not None else options[0],
+                               required=True, key=key) or (default if default is not None else options[0])
 
 
 def period_pick() -> tuple[str, str]:
-    period = st.radio("기간", ["1일", "5일", "20일"], horizontal=True, key="mc_period")
+    period = _seg("기간", ["1일", "5일", "20일"], key="mc_period")
     return period, {"1일": "d1", "5일": "d5", "20일": "d20"}[period]
 
 
 def tab_markets(snap: dict) -> None:
     sm, ver, fred = snap["sm"], snap["ver"], snap["fred"]
-    st.markdown("#### 세계 주요 지수")
+    _sec("세계 주요 지수")
     rows = []
     for i in C.INDICES:
         s = sm.get(i["yf"])
@@ -117,7 +235,7 @@ def tab_markets(snap: dict) -> None:
     st.markdown(_table(["지역", "지수", "종가", "1일", "5일", "20일", "50일선", "기준일", "검증", "대조"], rows, left=2),
                 unsafe_allow_html=True)
 
-    st.markdown("#### 금리 · 환율 · 원자재")
+    _sec("금리 · 환율 · 원자재")
     rows = []
     for m in C.MACRO:
         key = macro.key_of(m)
@@ -131,7 +249,7 @@ def tab_markets(snap: dict) -> None:
         rows.append([m["group"], m["name"], val, d1, d20, f'{s["date"]:%m/%d}' if s else "—", _chip(v), "§" + html.escape(note)])
     st.markdown(_table(["구분", "항목", "값", "1일", "20일", "기준일", "검증", "대조"], rows, left=2), unsafe_allow_html=True)
 
-    st.markdown("#### 시장 체력 · 위험 지표")
+    _sec("시장 체력 · 위험 지표")
     rows = []
     for x in C.VOL:
         s = sm.get(x["yf"])
@@ -151,11 +269,11 @@ def tab_markets(snap: dict) -> None:
 def tab_sectors(snap: dict) -> None:
     sm, ver = snap["sm"], snap["ver"]
     period, k = period_pick()
-    st.markdown("#### 미국 섹터 ETF")
+    _sec("미국 섹터 ETF")
     sec = dict(C.SECTORS)
     st.markdown(_bars([(f"{n} {s}", (sm.get(s) or {}).get(k)) for s, n in C.SECTORS]), unsafe_allow_html=True)
 
-    st.markdown("#### 섹터별 대장주")
+    _sec("섹터별 대장주")
     st.caption("섹터 대비 = 종목 등락 − 소속 섹터 ETF 등락(같은 기간). 양수면 섹터보다 강했다는 뜻이에요.")
     rows = []
     for etf, names in C.LEADERS.items():
@@ -171,17 +289,17 @@ def tab_sectors(snap: dict) -> None:
 
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("#### 테마 ETF")
+        _sec("테마 ETF")
         st.markdown(_bars([(f"{n} {s}", (sm.get(s) or {}).get(k)) for s, n in C.THEMES]), unsafe_allow_html=True)
     with c2:
-        st.markdown("#### 한국 대장주")
+        _sec("한국 대장주")
         st.markdown(_bars([(n, (sm.get(c) or {}).get(k)) for c, n, _ in C.KR_LEADERS]), unsafe_allow_html=True)
         st.caption("네이버 일봉(장중 갱신). 단일출처예요.")
 
 
 def tab_news(snap: dict) -> None:
     news = snap.get("news") or []
-    pick = st.radio("보기", ["사실만(교차확인·단일출처)", "교차확인만", "주장·의견까지 전부"], horizontal=True, key="mc_news")
+    pick = _seg("보기", ["사실만(교차확인·단일출처)", "교차확인만", "주장·의견까지 전부"], key="mc_news")
     allow = {"사실만(교차확인·단일출처)": ("교차확인", "단일출처"), "교차확인만": ("교차확인",),
              "주장·의견까지 전부": ("교차확인", "단일출처", "주장", "의견")}[pick]
     cnt = {s: sum(1 for n in news if n["status"] == s) for s in CHIP}
@@ -236,19 +354,22 @@ def _ai_block(key: str, context: str, question: str, label: str) -> None:
 
 def tab_today(snap: dict) -> None:
     v = trend.market_view(snap)
+    vc = {"good": UP, "warn": "#E0672B", "bad": DOWN}[v["tone"]]
     st.markdown(
-        f'<div class="mc-sum" style="background:{TONE_BG[v["tone"]]}"><b style="font-size:1.15rem">추세추종 판단: {v["verdict"]}</b>'
-        f'<br>{html.escape(v["say"])}</div>', unsafe_allow_html=True)
-    st.markdown("".join(
-        f'<div style="margin:2px 0"><span style="color:{LEVEL[x["level"]][1]}">{LEVEL[x["level"]][0]}</span> '
-        f'{html.escape(x["text"])}</div>' for x in v["lines"]), unsafe_allow_html=True)
+        f'<div class="verdict" style="--vc:{vc}"><div class="v-top"><span class="v-lab">추세추종 판단</span>'
+        f'<span>점수 {v["score"]:+d} · {snap["at"]:%m/%d %H:%M}</span></div>'
+        f'<div class="v-title">{html.escape(v["verdict"])}</div><div class="v-act">{html.escape(v["say"])}</div></div>',
+        unsafe_allow_html=True)
+    st.markdown('<div class="mc-sum">' + "".join(
+        f'<div style="margin:3px 0"><span style="color:{LEVEL[x["level"]][1]}">{LEVEL[x["level"]][0]}</span> '
+        f'{html.escape(x["text"])}</div>' for x in v["lines"]) + "</div>", unsafe_allow_html=True)
     st.caption("빨강 = 좋은 신호, 노랑 = 주의, 파랑 = 나쁜 신호, 회색 = 참고. 규칙은 보내 주신 블로그(버터대디·미너비니 등)의 "
                "추세추종 기준을 숫자로 옮긴 거예요(10일선 회복, 50일선 중심선, 200일선 사나이테스트, 나스닥 -3%, 10년물 5%). "
                "판단 문구는 규칙의 결과일 뿐 투자 권유가 아니에요.")
 
     reg = trend.rate_regime(snap["sm"])
     if reg:
-        st.markdown("#### 금리 국면")
+        _sec("금리 국면")
         secs = sorted([(n, snap["sm"][s]["d20"]) for s, n in C.SECTORS if snap["sm"].get(s) and snap["sm"][s]["d20"] is not None],
                       key=lambda x: -x[1])
         now = " · ".join(f"{n} {d:+.1f}%" for n, d in secs[:3]) + "  …  " + " · ".join(f"{n} {d:+.1f}%" for n, d in secs[-3:])
@@ -257,7 +378,7 @@ def tab_today(snap: dict) -> None:
             f'과거 이 국면에서 강했던 섹터(블로그 인용 표): {html.escape(reg["past"] or "표에 없는 국면이에요")}<br>'
             f'최근 20일 실제 섹터: 강한 쪽 {html.escape(now)}</div>', unsafe_allow_html=True)
 
-    st.markdown("#### 🤖 AI 시황 해설")
+    _sec("🤖 AI 시황 해설")
     st.caption("대시보드 숫자 + 뉴스 + 보내 주신 이미지에서 정리한 지식 노트를 주고, 외신(NYT·WSJ·FT·Reuters·Bloomberg 등)을 "
                "직접 검색해 사실을 확인한 뒤 이슈와 섹터 반응을 연결해 설명하게 해요.")
     _ai_block("market", ai.market_context(snap, v, issues.build(snap), reg), ai.MARKET_ASK, "AI 해설 만들기")
@@ -282,8 +403,8 @@ def tab_charts(snap: dict) -> None:
     px, tr, sm = snap.get("px", {}), snap.get("trend", {}), snap["sm"]
     groups = _groups()
     c1, c2 = st.columns([3, 2])
-    g = c1.radio("묶음", list(groups), horizontal=True, key="ch_group")
-    order = c2.radio("정렬", ["기본", "20일 강한 순", "추세 점수 순"], horizontal=True, key="ch_order")
+    g = _seg("묶음", list(groups), key="ch_group", where=c1)
+    order = _seg("정렬", ["기본", "20일 강한 순", "추세 점수 순"], key="ch_order", where=c2)
     items = [(s, n) for s, n in groups[g] if s in px]
     if order == "20일 강한 순":
         items.sort(key=lambda x: -((sm.get(x[0]) or {}).get("d20") or -999))
@@ -296,12 +417,12 @@ def tab_charts(snap: dict) -> None:
     cols = st.columns(3)
     for i, (sym, name) in enumerate(items):
         s, t = sm.get(sym), tr.get(sym)
-        with cols[i % 3]:
+        with cols[i % 3], st.container(border=True):
             stage = t["stage"] if t else "—"
             col = trend.STAGE_COLOR.get(stage, FLAT)
             last = f'{s["last"]:{_fmt_for(s["last"])}}' if s else "—"
             st.markdown(
-                f'<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px">'
+                f'<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:0">'
                 f'<b>{html.escape(name)} <span style="color:#6B7A85;font-weight:400;font-size:.8rem">{html.escape(sym)}</span></b>'
                 f'<span>{last} {_p(s and s["d1"])}</span></div>'
                 f'<div style="font-size:.78rem;margin-bottom:-6px">'
@@ -310,13 +431,13 @@ def tab_charts(snap: dict) -> None:
                 unsafe_allow_html=True)
             st.plotly_chart(charts.mini(px[sym]), key=f"mini_{g}_{sym}", config={"displayModeBar": False, "staticPlot": True})
             if t:
-                st.markdown(f'<div style="font-size:.78rem;color:#51616C;margin:-10px 0 8px">{html.escape(t["comment"])}</div>',
+                st.markdown(f'<div style="font-size:.78rem;color:#51616C;margin:-6px 0 2px">{html.escape(t["comment"])}</div>',
                             unsafe_allow_html=True)
 
-    st.markdown("#### 크게 보기")
+    _sec("크게 보기")
     d1, d2 = st.columns([3, 2])
     pick = d1.selectbox("종목·지수", items, format_func=lambda x: f"{x[1]} ({x[0]})", key=f"ch_pick_{g}")
-    per = d2.radio("기간", list(charts.PERIODS), index=1, horizontal=True, key="ch_per")
+    per = _seg("기간", list(charts.PERIODS), key="ch_per", where=d2, default="6개월")
     df = px.get(pick[0])
     if df is not None and len(df):
         st.plotly_chart(charts.candle(df, charts.PERIODS[per], fmt=_fmt_for(float(df["close"].iloc[-1]))),
@@ -377,19 +498,19 @@ def tab_econ(snap: dict) -> None:
         rows.append([e["name"], _val(s and s["last"], e), _val(s and s["prev"], e),
                      f'{s["date"]:%Y-%m-%d}' if s else "—",
                      f'{_val(s and s["y_lo"], e)} ~ {_val(s and s["y_hi"], e)}' if s else "—", "§" + html.escape(e["read"])])
-    st.markdown("#### 미국 경제지표 한눈에")
+    _sec("미국 경제지표 한눈에")
     st.markdown(_table(["지표", "최근", "직전", "기준일", "1년 범위", "읽는 법"], rows), unsafe_allow_html=True)
     st.caption("FRED(세인트루이스 연준) 자료. CPI·PCE·산업생산은 전년 대비 %, 고용은 전월 대비 증감, 소매판매는 전월 대비 %예요.")
 
-    st.markdown("#### 지표 자세히 보기 + 발표일 각국 지수 반응")
+    _sec("지표 자세히 보기 + 발표일 각국 지수 반응")
     names = {e["name"]: e for e in C.ECON}
-    pick = st.radio("지표", list(names), horizontal=True, key="ec_pick")
+    pick = _seg("지표", list(names), key="ec_pick")
     e = names[pick]
     s = series.get(e["id"])
     if s is None or s.empty:
         st.info("이 지표를 받지 못했어요.")
         return
-    span = st.radio("기간", ["1년", "5년", "전체(약 12년)"], horizontal=True, key="ec_span")
+    span = _seg("기간", ["1년", "5년", "전체(약 12년)"], key="ec_span")
     cut = {"1년": 1, "5년": 5}.get(span)
     show = s[s["date"] >= s["date"].iloc[-1] - pd.DateOffset(years=cut)] if cut else s
     st.plotly_chart(charts.line(show, f'{e["name"]} ({e["unit"] or "지수"})', zero=e["how"] in ("diff", "mom")),
@@ -423,6 +544,204 @@ def tab_econ(snap: dict) -> None:
                          _pp(x["cool"]) if x["sym"] == "^TNX" else _p(x["cool"]),
                          f'{x["n_hot"]} / {x["n_cool"]}'] for x in stats]), unsafe_allow_html=True)
     st.caption("표본이 12번 안팎이라 평균은 참고용이에요. 같은 날 다른 뉴스(실적·전쟁 등)도 섞여 있어요.")
-    st.markdown(f"#### 🤖 {e['name']} 해석 (기사·리포트 검색)")
+    _sec(f"🤖 {e['name']} 해석", "기사·리포트 검색")
     _ai_block(f"econ_{e['id']}", ai.indicator_context(e, summ.get(e["id"]), rel, stats, sahm), ai.INDICATOR_ASK,
               f"{e['name']} AI 해석 만들기")
+
+
+# ═══════════════════════════ 세계 시황 해석(첫 탭) ═══════════════════════════
+def _news_cards(items: list[dict], n: int = 6) -> None:
+    for nw in items[:n]:
+        maj = f' · <b>주요 외신</b> {html.escape(", ".join(nw["major"]))}' if nw.get("major") else ""
+        when = nw["when"].astimezone(S.KST).strftime("%m/%d %H:%M") if nw.get("when") else ""
+        st.markdown(f'<div class="mc-news">{_chip(nw["status"])} <span class="m">{when}</span>'
+                    f'<div class="h"><a href="{html.escape(nw["url"])}" target="_blank">{html.escape(nw["title"])}</a></div>'
+                    f'<div class="m">{html.escape(", ".join(nw["sources"]))}{maj}</div></div>', unsafe_allow_html=True)
+
+
+def tab_world(snap: dict) -> None:
+    reps = report.all_reports()
+    if reps:
+        pick = reps[0]
+        if len(reps) > 1:
+            choice = st.selectbox("해석 글", reps, format_func=lambda r: f'{r["when"]} · {r["title"]}', key="rep_pick")
+            pick = choice or reps[0]
+        st.markdown(f'<div class="rep"><div class="rep-top"><span class="brand-tag">🌐 세계 시황 해석</span>'
+                    f'<span class="mc-legend" style="margin:0">{pick["when"]} (한국시간) · 매일 오전 8시·밤 8시</span></div>'
+                    f'<div class="rep-t">{html.escape(pick["title"])}</div>'
+                    + (f'<div class="rep-lead">{html.escape(pick["lead"])}</div>' if pick["lead"] else "") + "</div>",
+                    unsafe_allow_html=True)
+        with st.container(border=True):
+            st.markdown("\n".join(l for l in report.body(pick["text"]).splitlines() if not l.startswith(">")))
+        st.caption("Claude가 지수·수급·외신을 출처 2곳 이상 맞춰 보고 쓴 글이에요. [사실]은 숫자·보도, [해석]은 Claude의 판단, "
+                   "[블로그 관점]은 보내 주신 사진의 관점이에요. 투자 권유가 아니에요.")
+    else:
+        st.info("아직 해석 글이 없어요. 매일 오전 8시·밤 8시에 자동으로 올라와요.")
+
+    iss = {x["key"]: x for x in issues.build(snap)}
+    _sec("유가 · 중동", "지금 숫자(실시간 데이터)")
+    keys = [("CL=F", "WTI", "idx"), ("BZ=F", "브렌트", "idx"), ("^OVX", "OVX(유가 변동성)", "idx"), ("GC=F", "금", "idx"),
+            ("DX-Y.NYB", "달러인덱스", "idx"), ("fred:DGS10", "미 10년물", "rate")]
+    st.markdown('<div class="idx-row">' + "".join(_kpi(snap, *k) for k in keys) + "</div>", unsafe_allow_html=True)
+    c1, c2 = st.columns([3, 2])
+    with c1:
+        df = snap.get("px", {}).get("CL=F")
+        if df is not None and len(df):
+            st.plotly_chart(charts.candle(df, 126, show_vol=False, height=380), key="oil_chart",
+                            config={"displaylogo": False})
+            t = snap.get("trend", {}).get("CL=F")
+            if t:
+                st.caption(f"WTI {t['stage']}: {t['comment']}")
+    with c2:
+        oil = iss.get("oil")
+        if oil:
+            st.markdown(f'<div class="mc-sum"><b>유가가 움직이면 무엇이 같이 움직였나 (5일)</b><br>{html.escape(oil["comment"])}</div>',
+                        unsafe_allow_html=True)
+            rows = [[html.escape(l["name"]), "같이" if l["how"] == "same" else "반대", l["move"],
+                     "—" if l["ok"] is None else ("✔" if l["ok"] else "✘")] for l in oil["links"]]
+            st.markdown(_table(["섹터·지표", "가설", "5일", "맞음"], rows), unsafe_allow_html=True)
+
+    _sec("전쟁 · 지정학 · 유가 뉴스", "외신 우선, 사실 라벨")
+    geo = sorted({id(n): n for k in ("oil", "defense") if k in iss for n in iss[k]["news"]}.values(),
+                 key=lambda n: ({"교차확인": 0, "단일출처": 1, "주장": 2, "의견": 3}[n["status"]], -len(n.get("major", []))))
+    if geo:
+        _news_cards(geo, 8)
+    else:
+        st.caption("지난 24시간 관련 뉴스가 없어요.")
+
+    _sec("세계 지수 한눈에", "1일 · 5일 등락")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(_bars([(f'{i["region"]} {i["name"]}', (snap["sm"].get(i["yf"]) or {}).get("d1")) for i in C.INDICES]),
+                    unsafe_allow_html=True)
+    with c2:
+        st.markdown(_bars([(f'{i["region"]} {i["name"]}', (snap["sm"].get(i["yf"]) or {}).get("d5")) for i in C.INDICES]),
+                    unsafe_allow_html=True)
+
+
+# ═══════════════════════════ 수급(네이버) ═══════════════════════════
+@st.cache_data(ttl=10 * 60, show_spinner="수급을 받는 중이에요…")
+def _flows() -> tuple[dict, dict]:
+    ov = flows.fetch_market_overview()
+    return ov, flows.fetch_investor_flows(ov)
+
+
+def _eok(v) -> str:
+    if v is None or pd.isna(v):
+        return "—"
+    return f'<span style="color:{_c(v)}">{v:+,.0f}억</span>'
+
+
+def tab_flows(snap: dict) -> None:
+    ov, fl = _flows()
+    _sec("오늘 코스피 · 코스닥", "네이버 증권(밸류체인 신고가 보드와 같은 출처)")
+    cards = []
+    for mk in ("코스피", "코스닥"):
+        o = ov.get(mk) or {}
+        d, b = o.get("deal") or {}, o.get("breadth") or {}
+        rate = o.get("rate")
+        cards.append(
+            f'<div class="idx"><div class="idx-name">{mk}<small>{html.escape(str(o.get("status") or ""))}</small></div>'
+            f'<div class="idx-val">{(o.get("last") or 0):,.2f}</div>'
+            + (f'<span class="idx-chg" style="color:{_c(rate)}">{rate:+.2f}%</span>' if rate is not None else "")
+            + f'<div style="font-size:.8rem;margin-top:.3rem">외국인 {_eok(d.get("외국인"))} · 기관 {_eok(d.get("기관"))} · '
+              f'개인 {_eok(d.get("개인"))}<br>프로그램 {_eok(o.get("program"))} · 상승 {b.get("상승") or "—"} / 하락 {b.get("하락") or "—"}</div></div>')
+    st.markdown('<div class="idx-row" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))">' + "".join(cards) + "</div>",
+                unsafe_allow_html=True)
+    for mk in ("코스피", "코스닥"):
+        df = fl.get(mk)
+        if df is None or df.empty:
+            st.info(f"{mk} 일별 수급을 받지 못했어요.")
+            continue
+        _sec(f"{mk} 투자자별 순매수", "최근 20거래일 · 억원")
+        d = df.tail(20).iloc[::-1]
+        rows = [["최근 5일 합계"] + [_eok(df.tail(5)[k].sum()) for k in flows.INVESTORS]
+                + [_eok(df.tail(5)[k].sum()) if df[k].notna().any() else "—" for k in ("금융투자", "투신(사모)", "연기금")],
+                ["최근 20일 합계"] + [_eok(df.tail(20)[k].sum()) for k in flows.INVESTORS]
+                + [_eok(df.tail(20)[k].sum()) if df[k].notna().any() else "—" for k in ("금융투자", "투신(사모)", "연기금")]]
+        rows += [[f'{r["date"]:%m/%d}'] + [_eok(r[k]) for k in flows.INVESTORS + ["금융투자", "투신(사모)", "연기금"]]
+                 for _, r in d.iterrows()]
+        st.markdown(_table(["날짜", "개인", "외국인", "기관", "금융투자", "투신", "연기금"], rows), unsafe_allow_html=True)
+    st.caption("외국인·기관이 같이 사는 날이 이어지면 수급이 받쳐 주는 구간, 개인만 사는 날이 이어지면 수급이 약한 구간으로 봐요(블로그 관점).")
+
+
+# ═══════════════════════════ 상관관계 ═══════════════════════════
+@st.cache_data(ttl=3600, show_spinner="10년치 지수를 받는 중이에요…")
+def _long() -> dict:
+    return corr.fetch_long()
+
+
+def _corr_cell(s: dict | None) -> str:
+    if not s or s.get("corr") is None:
+        return "—"
+    c = s["corr"]
+    col = UP if c >= 0.5 else ("#E0672B" if c >= 0.3 else FLAT)
+    return (f'<b style="color:{col}">{c:.2f}</b><br><span style="font-size:.72rem;color:#6B7A85">'
+            f'{corr.read(c)} · β {s["beta"]:.2f}</span>')
+
+
+def tab_corr(snap: dict) -> None:
+    px = _long()
+    if len(px) < 2:
+        st.info("지수 장기 데이터를 받지 못했어요.")
+        return
+    _sec("기간별 상관계수", "일간 등락률 기준 · β = 나스닥(기준) 1% 움직일 때 대상이 움직인 %")
+    rows = []
+    for r in corr.table(px):
+        rows.append([html.escape(r["pair"])] + [_corr_cell(r["cells"].get(n)) for n, _ in corr.WINDOWS])
+    st.markdown(_table(["비교"] + [n for n, _ in corr.WINDOWS], rows), unsafe_allow_html=True)
+    st.caption("상관계수: 1이면 완전히 같이, 0이면 무관, −1이면 반대로 움직여요. 미국 장은 한국 장이 끝난 뒤에 열리니 "
+               "'전날 밤 나스닥 → 오늘 코스피'가 실제 영향을 더 잘 보여 줘요. 0.5 이상 강함, 0.3~0.5 보통.")
+
+    _sec("최근 1~3일 · 1주 · 1달", "같은 방향이었던 날 수 · 누적 등락")
+    rows = []
+    for b, t, lag in corr.PAIRS[:2] + corr.PAIRS[4:]:
+        if b not in px or t not in px:
+            continue
+        m = corr.align(px[b], px[t], lag)
+        cells = []
+        for name, n in corr.RECENT:
+            s = corr.stats(m.tail(n))
+            if not s:
+                cells.append("—")
+                continue
+            extra = f'<br><span style="font-size:.72rem">계수 {s["corr"]:.2f}</span>' if s.get("corr") is not None else ""
+            cells.append(f'{s["same"]}/{s["n"]}일 같은 방향<br>{_p(s["base_cum"], 1)} vs {_p(s["tgt_cum"], 1)}{extra}')
+        rows.append([html.escape(f"{b} → {t}" + (" (전날 밤 → 오늘)" if lag else " (같은 날)"))] + cells)
+    st.markdown(_table(["비교"] + [n for n, _ in corr.RECENT], rows), unsafe_allow_html=True)
+
+    _sec("날짜별 나란히 보기", "최근 21거래일 · 한국 날짜 기준")
+    rd = corr.recent_days(px)
+    if not rd.empty:
+        body = []
+        for _, r in rd.iterrows():
+            nq, ks = r["나스닥(전날 밤)"], r["코스피"]
+            kq = r.get("코스닥")
+            same = (nq > 0) == (ks > 0)
+            body.append([f'{r["date"]:%m/%d}', f'{r["bdate"]:%m/%d} {_p(nq)}', _p(ks), _p(kq),
+                         '<span style="color:#1D7A4C">같은 방향</span>' if same else '<span style="color:#B7791F">엇갈림</span>'])
+        st.markdown(_table(["한국 날짜", "전날 밤 나스닥", "코스피", "코스닥", "나스닥↔코스피"], body), unsafe_allow_html=True)
+
+    _sec("상관계수 흐름", "60거래일 이동 상관계수")
+    pair = _seg("비교", ["나스닥 → 코스피", "나스닥 → 코스닥", "코스피 ↔ 코스닥"], key="corr_pair")
+    b, t, lag = {"나스닥 → 코스피": ("나스닥", "코스피", True), "나스닥 → 코스닥": ("나스닥", "코스닥", True),
+                 "코스피 ↔ 코스닥": ("코스피", "코스닥", False)}[pair]
+    rl = corr.rolling(px, b, t, lag)
+    if not rl.empty:
+        st.plotly_chart(charts.line(rl, f"{pair} 60일 상관계수", height=300, zero=True), key="corr_roll",
+                        config={"displaylogo": False})
+        last = rl["value"].iloc[-1]
+        avg = rl["value"].mean()
+        st.caption(f"지금 {last:.2f} · 전체 기간 평균 {avg:.2f} — "
+                   + ("평소보다 더 같이 움직이는 중(미국 영향이 커진 구간)" if last > avg + 0.1 else
+                      "평소보다 덜 같이 움직이는 중(한국만의 재료·수급이 큰 구간)" if last < avg - 0.1 else "평소 수준이에요"))
+
+
+def data_status() -> None:
+    """화면 맨 아래: 출처별로 받았는지/못 받았는지."""
+    if not S.STATUS:
+        return
+    with st.expander("🔧 데이터 상태 (빈칸이 보이면 여기를 캡처해 주세요)"):
+        rows = [[html.escape(k), '<span style="color:#1D7A4C">받음</span>' if ok else '<span style="color:#C53030">실패</span>',
+                 html.escape(msg), t] for k, (ok, msg, t) in sorted(S.STATUS.items())]
+        st.markdown(_table(["출처", "상태", "설명", "시각"], rows), unsafe_allow_html=True)

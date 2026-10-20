@@ -5,11 +5,13 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+import theme
+
 UP, DOWN = "#D6333B", "#1F66C9"
 MA_SET = ((10, "10일"), (20, "20일"), (50, "50일"), (200, "200일"))
 MA_COLORS = ("#E0672B", "#2E9D5B", "#7A4FD1", "#8A96A0")
 PERIODS = {"3개월": 63, "6개월": 126, "1년": 250, "2년": 500}
-FONT = dict(family="Pretendard, Malgun Gothic, sans-serif", size=12)
+FONT = dict(family=theme.CHART_FONT, size=12)
 
 
 def _prep(df: pd.DataFrame, n: int) -> pd.DataFrame:
@@ -48,7 +50,8 @@ def candle(df: pd.DataFrame, n: int = 126, show_vol: bool = True, height: int = 
     fig.update_layout(height=height, margin=dict(l=4, r=4, t=30, b=6), hovermode="x unified", dragmode="pan",
                       plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF", font=FONT,
                       legend=dict(orientation="h", y=1.06, x=0, font=dict(size=12)))
-    return fig
+    fig.update_xaxes(showspikes=True, spikemode="across", spikethickness=1)
+    return theme.style_fig(fig)
 
 
 def mini(df: pd.DataFrame, n: int = 126, height: int = 210) -> go.Figure:
@@ -67,7 +70,7 @@ def mini(df: pd.DataFrame, n: int = 126, height: int = 210) -> go.Figure:
     fig.update_yaxes(side="right", gridcolor="#F1F4F6", zeroline=False, tickfont=dict(size=10), nticks=4)
     fig.update_layout(height=height, margin=dict(l=0, r=0, t=4, b=0), plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
                       font=FONT, dragmode=False)
-    return fig
+    return theme.style_fig(fig)
 
 
 def line(df: pd.DataFrame, title: str = "", color: str = "#2C5282", height: int = 260, zero: bool = False) -> go.Figure:
@@ -81,4 +84,4 @@ def line(df: pd.DataFrame, title: str = "", color: str = "#2C5282", height: int 
     fig.update_layout(title=dict(text=title, font=dict(size=13)) if title else None, height=height,
                       margin=dict(l=4, r=4, t=30 if title else 6, b=4), plot_bgcolor="#FFFFFF",
                       paper_bgcolor="#FFFFFF", font=FONT, hovermode="x")
-    return fig
+    return theme.style_fig(fig)
