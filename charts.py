@@ -139,3 +139,51 @@ def group_bars(groups: dict, height: int = 200) -> go.Figure:
     fig.update_layout(height=height, margin=dict(l=4, r=4, t=4, b=4), plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
                       font=FONT, bargap=0.35)
     return theme.style_fig(fig)
+
+
+def alloc_bars(c: dict, rows: list[dict], height: int = 150) -> go.Figure:
+    """지금 계좌(종목별) vs 권장 주식 비중(구간 가운데 값)."""
+    pal = ["#D6333B", "#E0672B", "#B7791F", "#2E9D5B", "#7A4FD1", "#1F66C9", "#0E7490", "#9D174D", "#4B5563"]
+    fig = go.Figure()
+    for i, r in enumerate(sorted(rows, key=lambda r: -r["w"])):
+        fig.add_trace(go.Bar(y=["지금"], x=[r["w"]], orientation="h", name=r["name"], marker_color=pal[i % len(pal)],
+                             text=f'{r["name"]} {r["w"]:.0f}%', textposition="inside", insidetextanchor="middle",
+                             hovertemplate=f'{r["name"]} {r["w"]:.1f}%<extra></extra>'))
+    if c["cash"]:
+        fig.add_trace(go.Bar(y=["지금"], x=[c["cash"]], orientation="h", name="현금", marker_color="#D1D5DB",
+                             text=f'현금 {c["cash"]:.0f}%', textposition="inside", hovertemplate="현금 %{x:.1f}%<extra></extra>"))
+    mid = (c["lo"] + c["hi"]) / 2
+    fig.add_trace(go.Bar(y=["권장"], x=[mid], orientation="h", name="주식(권장)", marker_color=c["band"]["color"],
+                         text=f'주식 {c["band"]["equity"]}', textposition="inside", hovertemplate="권장 주식 %{x:.0f}%<extra></extra>"))
+    fig.add_trace(go.Bar(y=["권장"], x=[100 - mid], orientation="h", name="현금(권장)", marker_color="#E5E7EB",
+                         text=f'현금 {100 - c["hi"]}~{100 - c["lo"]}%', textposition="inside",
+                         hovertemplate="권장 현금 %{x:.0f}%<extra></extra>"))
+    fig.add_vrect(x0=c["lo"], x1=c["hi"], fillcolor=c["band"]["color"], opacity=0.08, line_width=0)
+    fig.update_layout(barmode="stack", height=height, showlegend=False, margin=dict(l=4, r=4, t=4, b=4),
+                      plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF", font=FONT, uniformtext=dict(minsize=9, mode="hide"))
+    fig.update_xaxes(range=[0, 100], ticksuffix="%", gridcolor="#EEF1F3")
+    fig.update_yaxes(autorange="reversed")
+    return theme.style_fig(fig)
+
+
+def rebased(items: list[tuple[str, pd.Series | None]], n: int = 126, height: int = 360) -> go.Figure:
+    """여러 종목·지수를 같은 출발점(100)에서 비교."""
+    pal = ["#D6333B", "#E0672B", "#2E9D5B", "#7A4FD1", "#0E7490", "#9D174D", "#B7791F", "#4B5563"]
+    fig = go.Figure()
+    k = 0
+    for name, s in items:
+        if s is None or len(s) < 5:
+            continue
+        s = s.tail(n)
+        idx = name in ("코스피", "나스닥")
+        fig.add_trace(go.Scatter(x=s.index, y=s / s.iloc[0] * 100, mode="lines", name=name,
+                                 line=dict(color="#9CA3AF" if idx else pal[k % len(pal)], width=1.4 if idx else 2,
+                                           dash="dot" if idx else "solid"),
+                                 hovertemplate=f"{name} %{{y:.1f}}<extra></extra>"))
+        k += 0 if idx else 1
+    fig.add_hline(y=100, line=dict(color="#D1D5DB", width=1))
+    fig.update_yaxes(side="right", gridcolor="#EEF1F3")
+    fig.update_xaxes(showgrid=False)
+    fig.update_layout(height=height, margin=dict(l=4, r=4, t=10, b=4), hovermode="x unified", plot_bgcolor="#FFFFFF",
+                      paper_bgcolor="#FFFFFF", font=FONT, legend=dict(orientation="h", y=1.08, x=0))
+    return theme.style_fig(fig)

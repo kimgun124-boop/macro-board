@@ -411,9 +411,33 @@ def history(snap: dict, dgs10: pd.DataFrame | None = None) -> pd.DataFrame:
     for k, s in (("kospi", base["kospi"]), ("nasdaq", base["nasdaq"])):
         if s is not None:
             out[k] = al(s).values
+    for k in P:
+        out["p_" + k] = P[k].values
     out = out[total.values >= 30].dropna(subset=["score"]).reset_index(drop=True)
     out["band"] = out["score"].map(lambda v: band(v)["name"])
+    out.attrs["max"] = mx
     return out
+
+
+NAMES = {"nasdaq": "나스닥 추세", "spx": "S&P 추세", "kospi": "코스피 추세", "core": "전닉 추세", "rate": "미 10년물",
+         "oil": "WTI 유가", "vix": "VIX", "panic": "나스닥 패닉", "breadth": "미국 섹터 폭", "krw": "원/달러"}
+
+
+def changes(h: pd.DataFrame, back: int = 5) -> dict | None:
+    """back 거래일 전과 비교: 점수·구간 변화와 점수가 바뀐 신호."""
+    if h.empty or len(h) <= back:
+        return None
+    now, then = h.iloc[-1], h.iloc[-1 - back]
+    moved = []
+    for c in [c for c in h.columns if c.startswith("p_")]:
+        a, b = then[c], now[c]
+        if pd.notna(a) and pd.notna(b) and abs(b - a) >= 0.5:
+            moved.append({"key": c[2:], "name": NAMES.get(c[2:], c[2:]), "from": float(a), "to": float(b),
+                          "max": h.attrs.get("max", {}).get(c[2:])})
+    moved.sort(key=lambda m: -abs(m["to"] - m["from"]))
+    d1 = float(now["score"] - h.iloc[-2]["score"]) if len(h) > 1 else None
+    return {"d1": d1, "d5": float(now["score"] - then["score"]), "band_then": then["band"], "band_now": now["band"],
+            "moved": moved, "date_then": then["date"]}
 
 
 def band_stats(h: pd.DataFrame, fwd: int = 20) -> list[dict]:

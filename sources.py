@@ -359,6 +359,64 @@ def _treasury(series: str, start: str) -> pd.DataFrame:
     return df[df["date"] >= start].reset_index(drop=True)
 
 
+# ─────────── FRED가 막힐 때: 원래 발표 기관에서 직접 ───────────
+def parse_nyfed(js: dict) -> pd.DataFrame:
+    rows = [(r.get("effectiveDate"), r.get("percentRate")) for r in (js or {}).get("refRates", [])]
+    df = pd.DataFrame(rows, columns=["date", "value"])
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    return df.dropna().sort_values("date").reset_index(drop=True)
+
+
+def parse_freddie(text: str) -> pd.DataFrame:
+    """프레디맥 주간 모기지 금리 CSV(date, pmms30, …)."""
+    df = pd.read_csv(io.StringIO(text))
+    if "date" not in df or "pmms30" not in df:
+        return EMPTY_FRED
+    out = pd.DataFrame({"date": pd.to_datetime(df["date"], errors="coerce", format="mixed"),
+                        "value": pd.to_numeric(df["pmms30"], errors="coerce")})
+    return out.dropna().sort_values("date").reset_index(drop=True)
+
+
+def parse_umich(text: str) -> pd.DataFrame:
+    """미시간대 소비자심리 CSV(Month, YYYY, ICS_ALL)."""
+    lines = [l for l in text.splitlines() if l.strip()]
+    head = next((i for i, l in enumerate(lines) if "YYYY" in l.upper()), None)
+    if head is None:
+        return EMPTY_FRED
+    df = pd.read_csv(io.StringIO("\n".join(lines[head:])))
+    cols = {c.strip().upper(): c for c in df.columns}
+    m, y = cols.get("MONTH"), cols.get("YYYY")
+    v = next((c for k, c in cols.items() if k.startswith("ICS")), None)
+    if not (m and y and v):
+        return EMPTY_FRED
+    date = pd.to_datetime(df[m].astype(str).str.strip() + " " + df[y].astype(str).str.strip(), errors="coerce", format="%B %Y")
+    out = pd.DataFrame({"date": date, "value": pd.to_numeric(df[v], errors="coerce")})
+    return out.dropna().sort_values("date").reset_index(drop=True)
+
+
+ORIGIN = {
+    "DFF": ("뉴욕연은", "https://markets.newyorkfed.org/api/rates/unsecured/effr/last/2500.json", "json", parse_nyfed),
+    "MORTGAGE30US": ("프레디맥", "https://www.freddiemac.com/pmms/docs/PMMS_history.csv", "text", parse_freddie),
+    "UMCSENT": ("미시간대", "https://www.sca.isr.umich.edu/files/tbmics.csv", "text", parse_umich),
+}
+
+
+def _origin(series: str, start: str) -> pd.DataFrame:
+    spec = ORIGIN.get(series)
+    if not spec:
+        return EMPTY_FRED
+    _, url, kind, parse = spec
+    try:
+        r = session.get(url, timeout=20)
+        if not r.ok:
+            return EMPTY_FRED
+        df = parse(r.json() if kind == "json" else r.text)
+        return df[df["date"] >= start].reset_index(drop=True)
+    except Exception:
+        return EMPTY_FRED
+
+
 def _yahoo_rate(series: str, start: str) -> pd.DataFrame:
     t = YAHOO_RATE.get(series)
     if not t:
@@ -371,7 +429,7 @@ def _yahoo_rate(series: str, start: str) -> pd.DataFrame:
 
 
 def fred(series: str, days: int = 400) -> pd.DataFrame:
-    """FRED 시리즈(date, value). FRED가 막히면 FRED API(키) → DBnomics(BLS) → 미 재무부 → 야후 순서로 대신 받아요."""
+    """FRED 시리즈(date, value). FRED가 막히면 FRED API(키) → DBnomics(BLS) → 미 재무부 → 발표 기관(뉴욕연은·프레디맥·미시간대) → 야후 순서로 대신 받아요."""
     if MOCK:
         h = mock_history(series)
         out = pd.DataFrame({"date": h["date"], "value": (h["close"] / h["close"].iloc[0] * 3).round(2)})
@@ -380,7 +438,7 @@ def fred(series: str, days: int = 400) -> pd.DataFrame:
         return out
     start = (pd.Timestamp.today() - pd.Timedelta(days=days)).strftime("%Y-%m-%d")
     for name, fn in (("FRED", _fredgraph), ("FRED API", _fred_api), ("DBnomics(BLS)", _dbnomics),
-                     ("미 재무부", _treasury), ("야후", _yahoo_rate)):
+                     ("미 재무부", _treasury), (ORIGIN.get(series, ("발표 기관",))[0], _origin), ("야후", _yahoo_rate)):
         df = fn(series, start)
         if not df.empty:
             mark(f"경제지표 {series}", True, name)

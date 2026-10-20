@@ -60,7 +60,7 @@ def test_app_runs():
     from streamlit.testing.v1 import AppTest
     at = AppTest.from_file("../app.py", default_timeout=60).run()
     assert not at.exception
-    assert len(at.tabs) == 10
+    assert len(at.tabs) == 11
 
 
 def test_trend_stages():
@@ -163,3 +163,27 @@ def test_digest_and_treasury():
     assert real["value"].iloc[0] == 1.92
     import report
     assert report.section("# t\n## 뉴스 해석\n| a |\n## 다음\nx", "뉴스 해석") == "| a |"
+
+
+def test_portfolio_events_analog():
+    import alloc
+    import analog
+    import corr
+    import events
+    import flows
+    import portfolio
+    rows, cash, bad = portfolio.parse("삼성전자 30\n000660 20\nNVDA 10\n현금 40\n???")
+    assert [r["code"] for r in rows] == ["005930", "000660", "NVDA"] and cash == 40 and bad == ["???"]
+    assert portfolio.decode(portfolio.encode("삼성전자 30\n현금 70")) == "삼성전자 30\n현금 70"
+    snap = macro.snapshot()
+    px = {r["code"]: (sources.naver(r["code"]) if r["kr"] else sources.yahoo([r["code"]]).get(r["code"])) for r in rows}
+    a = alloc.build(snap, flows.fetch_investor_flows(flows.fetch_market_overview()))
+    c = portfolio.check(rows, cash, px, snap, a)
+    assert c["equity"] == 60 and all(i["ok"] for i in c["items"]) and portfolio.notes(c)
+    ev = events.calendar(pd.Timestamp("2026-10-20"), 35)
+    assert ev[0]["name"] == "FOMC 금리 결정" and ev[0]["dday"] == 9
+    assert any(e["kind"] == "kr_opt" and e["date"] == pd.Timestamp("2026-11-12") for e in ev)
+    res = analog.all_for(corr.fetch_long())
+    assert res["코스피"] and res["코스피"]["n"] >= 0
+    ch = alloc.changes(alloc.history(snap))
+    assert ch and "d5" in ch

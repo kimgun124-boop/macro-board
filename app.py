@@ -24,9 +24,10 @@ except KeyError:
 
 st.set_page_config(page_title="매크로 시황 보드", page_icon="🌍", layout="wide")
 
-# 탭 묶음: 1~4 판단·해석 · 5~7 시장 데이터 · 8~10 수급·지표 (묶음 색은 theme.py)
+# 탭 묶음: 1~5 판단·해석 · 6~8 시장 데이터 · 9~11 수급·지표 (묶음 색은 theme.py)
 TABS = [
     ("🎯 비중 판단", view.tab_alloc),
+    ("🧾 내 계좌", view.tab_account),
     ("🌐 세계 시황 해석", view.tab_world),
     ("📈 차트 보드", view.tab_charts),
     ("🔗 이슈 ↔ 섹터", view.tab_issues),

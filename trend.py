@@ -204,3 +204,72 @@ def market_view(snap: dict) -> dict:
         verdict, tone = "방어", "bad"
         say = "하락 추세나 위험 신호가 많아요. 신규 매수를 줄이고 손절선을 올리는 구간이에요. 반등이 나와도 새 주도주인지(반전), 예전 주도주인지(반등) 구분해 보세요."
     return {"verdict": verdict, "tone": tone, "say": say, "score": score, "lines": lines}
+
+
+def chart_read(df: pd.DataFrame | None, bench: pd.DataFrame | None = None, bench_name: str = "") -> dict | None:
+    """차트 한 장을 숫자로 읽기: 결론 한 줄 + 근거 줄(이평선 거리·고점·상대강도·거래량·변동성·최근 신호)."""
+    m = metrics(df)
+    if not m:
+        return None
+    c = df["close"].astype(float).reset_index(drop=True)
+    last, ma = m["last"], m["ma"]
+    lines = []
+    dist = " · ".join(f"{n}일선 {(last / ma[n] - 1) * 100:+.1f}%" for n in (20, 50, 200) if ma[n])
+    lines.append(("info", f"이평선 거리: {dist}"))
+    fh = m["from_high"]
+    lines.append(("good" if fh >= -3 else "warn" if fh >= -15 else "bad",
+                  f"52주 고점 대비 {fh:+.1f}%" + (" · 신고가 근처" if fh >= -3 else " · 조정 폭 큼" if fh <= -20 else "")))
+    rel = None
+    j = None
+    if bench is not None and len(bench) > 61:
+        a = df[["date", "close"]].assign(date=pd.to_datetime(df["date"]).dt.normalize())
+        b = bench[["date", "close"]].assign(date=pd.to_datetime(bench["date"]).dt.normalize())
+        j = a.merge(b, on="date", suffixes=("", "_b")).astype({"close": float, "close_b": float})
+    if j is not None and len(j) > 61:
+        x, b = j["close"], j["close_b"]
+        r20 = (x.iloc[-1] / x.iloc[-21] - 1) * 100 - (b.iloc[-1] / b.iloc[-21] - 1) * 100
+        r60 = (x.iloc[-1] / x.iloc[-61] - 1) * 100 - (b.iloc[-1] / b.iloc[-61] - 1) * 100
+        rel = r20
+        lines.append(("good" if r20 > 0 else "bad", f"{bench_name} 대비 20일 {r20:+.1f}%p · 60일 {r60:+.1f}%p"
+                      + (" → 시장보다 강함" if r20 > 0 and r60 > 0 else " → 시장보다 약함" if r20 < 0 and r60 < 0 else " → 강약이 바뀌는 중")))
+    if "volume" in df and df["volume"].astype(float).tail(50).sum() > 0:
+        v = df["volume"].astype(float).reset_index(drop=True)
+        r = c.pct_change()
+        up, dn = v.tail(20)[r.tail(20) > 0].sum(), v.tail(20)[r.tail(20) < 0].sum()
+        ratio = up / dn if dn else None
+        v5 = v.tail(5).mean() / v.tail(50).mean() if v.tail(50).mean() else None
+        if ratio is not None:
+            lines.append(("good" if ratio >= 1.2 else "bad" if ratio <= 0.8 else "info",
+                          f"20일 상승일 거래량 = 하락일의 {ratio:.1f}배" + (" (사는 힘 우위)" if ratio >= 1.2 else " (파는 힘 우위)" if ratio <= 0.8 else "")
+                          + (f" · 최근 5일 거래량 50일 평균의 {v5:.1f}배" if v5 else "")))
+    if m["vol60"]:
+        k = m["vol20"] / m["vol60"]
+        lines.append(("good" if k < 0.9 else "warn" if k > 1.1 else "info",
+                      f"하루 변동폭 20일 {m['vol20']:.1f}% vs 60일 {m['vol60']:.1f}% → "
+                      + ("줄어드는 중" if k < 0.9 else "커지는 중" if k > 1.1 else "비슷")))
+    ma50s = c.rolling(50).mean()
+    side = (c > ma50s).tail(6).tolist()
+    ev = []
+    if len(side) == 6 and not side[0] and side[-1]:
+        ev.append("최근 5일 안 50일선 회복")
+    if len(side) == 6 and side[0] and not side[-1]:
+        ev.append("최근 5일 안 50일선 이탈")
+    if m["crossed10"]:
+        ev.append("10일선 회복(하락 멈춤 첫 신호)")
+    if m["heavy_down"]:
+        ev.append("거래량 실린 장대음봉(단기 고점 경고)")
+    if ev:
+        lines.append(("warn" if any("이탈" in e or "음봉" in e for e in ev) else "good", "최근 신호: " + ", ".join(ev)))
+    strong = m["stage"] in ("상승 추세", "추세 속 눌림")
+    weak = m["stage"] in ("하락 추세", "중기 조정")
+    if strong and (rel is None or rel > 0):
+        verdict, tone = "주도 흐름: 추세" + (" · 상대강도 모두 강함" if rel is not None else "가 살아 있음"), "good"
+    elif strong:
+        verdict, tone = "추세는 살아 있지만 시장보다 약해지는 중", "warn"
+    elif weak and rel is not None and rel > 0:
+        verdict, tone = "하락 추세지만 시장보다 덜 빠짐 → 바닥 다지기인지 확인", "warn"
+    elif weak:
+        verdict, tone = "추세" + (" · 상대강도 모두 약함" if rel is not None else "가 약함") + " → 추세추종 규칙상 비중 줄이는 쪽", "bad"
+    else:
+        verdict, tone = "방향 탐색: 50일선 회복·이탈이 다음 신호", "warn"
+    return {"verdict": verdict, "tone": tone, "lines": lines, "stage": m["stage"]}

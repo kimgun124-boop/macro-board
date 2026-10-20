@@ -126,8 +126,8 @@ CSS = f"""
 .st-key-main_tabs [role="tab"] {{ --gc: {PRI}; --gt: {PRI_SOFT};
   background: var(--card) !important; border: 1px solid var(--line) !important; border-radius: 12px !important;
   padding: 1.15rem 0.8rem 0.45rem !important; white-space: nowrap; box-shadow: 0 1px 2px rgba(16,24,40,.03); transition: .15s; }}
-.st-key-main_tabs [role="tab"]:nth-child(n+5):nth-child(-n+7) {{ --gc: {G2}; --gt: #FEF3C7; }}
-.st-key-main_tabs [role="tab"]:nth-child(n+8) {{ --gc: {G3}; --gt: #DBEAFE; }}
+.st-key-main_tabs [role="tab"]:nth-child(n+6):nth-child(-n+8) {{ --gc: {G2}; --gt: #FEF3C7; }}
+.st-key-main_tabs [role="tab"]:nth-child(n+9) {{ --gc: {G3}; --gt: #DBEAFE; }}
 .st-key-main_tabs [role="tab"]:hover {{ border-color: var(--gc) !important; background: var(--gt) !important; }}
 .st-key-main_tabs [role="tab"]::before {{ color: var(--gc); }}
 .st-key-main_tabs [role="tab"] p {{ color: #374151 !important; font-weight: 700; }}
