@@ -569,7 +569,8 @@ def parse_marts(content: bytes) -> pd.DataFrame:
             mons = [str(c).strip()[:3].lower() for c in cells if str(c).strip()[:3].lower() in _MON]
             m0 = _MON[mons[0]] if mons else None
             continue
-        if any(isinstance(c, str) and _RETAIL_TOTAL.search(c) for c in cells):
+        label = " ".join(str(c) for c in cells if isinstance(c, str)).lower()
+        if "retail" in label and "food" in label and "total" in label:
             nums = [float(c) for c in cells if isinstance(c, (int, float))]
             if len(nums) < 5:
                 break
