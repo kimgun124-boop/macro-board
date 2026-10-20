@@ -11,11 +11,14 @@ import requests
 
 import config as C
 import macro
+import trend
 
 
 def fmt(snap: dict) -> str:
     sm, ver = snap["sm"], snap["ver"]
-    lines = [f"🌍 **매크로 브리핑** {snap['at']:%m/%d %H:%M}", "· " + "\n· ".join(macro.facts(snap)), ""]
+    v = trend.market_view(snap)
+    lines = [f"🌍 **매크로 브리핑** {snap['at']:%m/%d %H:%M}", f"🧭 추세추종 판단: **{v['verdict']}** — {v['say']}",
+             "· " + "\n· ".join(macro.facts(snap)), ""]
     for i in C.INDICES[:8]:
         s = sm.get(i["yf"])
         if s and s["d1"] is not None:

@@ -24,7 +24,7 @@ import requests
 
 KST = timezone(timedelta(hours=9))
 MOCK = os.environ.get("MACRO_MOCK") == "1"
-COLUMNS = ["date", "close"]
+COLUMNS = ["date", "open", "high", "low", "close", "volume"]
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
@@ -71,34 +71,52 @@ def empty() -> pd.DataFrame:
 
 
 # ─────────────────────────── 가짜 데이터(MACRO_MOCK=1) ───────────────────────────
-def mock_history(code: str, count: int = 150) -> pd.DataFrame:
+def mock_history(code: str, count: int = 300) -> pd.DataFrame:
     rng = random.Random(int(hashlib.md5(code.encode()).hexdigest()[:8], 16))
     dates = pd.bdate_range(end=now_kst().date(), periods=count)
-    price, drift, closes = rng.uniform(20, 5_000), rng.uniform(-0.002, 0.003), []
+    price, drift, rows = rng.uniform(20, 5_000), rng.uniform(-0.001, 0.002), []
     for _ in dates:
+        o = price
         price = max(1.0, price * (1 + rng.gauss(drift, 0.015)))
-        closes.append(round(price, 2))
-    return pd.DataFrame({"date": dates, "close": closes})
+        hi, lo = max(o, price) * (1 + abs(rng.gauss(0, .006))), min(o, price) * (1 - abs(rng.gauss(0, .006)))
+        rows.append((round(o, 2), round(hi, 2), round(lo, 2), round(price, 2), int(rng.uniform(1e5, 1e7))))
+    df = pd.DataFrame(rows, columns=COLUMNS[1:])
+    df.insert(0, "date", dates)
+    return df
 
 
 # ─────────────────────────── 야후 ───────────────────────────
 def normalize_yf(hist: pd.DataFrame) -> pd.DataFrame:
-    """yfinance 결과 → date, close."""
+    """yfinance 결과 → date, open, high, low, close, volume."""
     if hist is None or hist.empty or "Close" not in hist:
         return empty()
     idx = pd.DatetimeIndex(hist.index)
     if idx.tz is not None:
         idx = idx.tz_localize(None)
-    close = hist["Close"]
-    if isinstance(close, pd.DataFrame):
-        close = close.iloc[:, 0]
-    df = pd.DataFrame({"date": idx.normalize(), "close": pd.to_numeric(close, errors="coerce").values})
-    df = df.dropna()
+
+    def col(name):
+        if name not in hist:
+            return None
+        v = hist[name]
+        if isinstance(v, pd.DataFrame):
+            v = v.iloc[:, 0]
+        return pd.to_numeric(v, errors="coerce").values
+
+    close = col("Close")
+    df = pd.DataFrame({"date": idx.normalize(), "close": close})
+    for k in ("open", "high", "low"):
+        v = col(k.capitalize())
+        df[k] = close if v is None else v
+    v = col("Volume")
+    df["volume"] = 0 if v is None else v
+    df = df[COLUMNS].dropna(subset=["close"])
+    df[["open", "high", "low"]] = df[["open", "high", "low"]].apply(lambda x: x.fillna(df["close"]))
+    df["volume"] = df["volume"].fillna(0)
     df = df[df["close"] > 0]
     return df.sort_values("date").drop_duplicates("date", keep="last").reset_index(drop=True)
 
 
-def yahoo(tickers: list[str], period: str = "7mo") -> dict[str, pd.DataFrame]:
+def yahoo(tickers: list[str], period: str = "2y") -> dict[str, pd.DataFrame]:
     """여러 티커를 한 번에. 못 받은 티커는 결과에서 빠져요."""
     if MOCK:
         return {t: mock_history(t) for t in tickers}
@@ -176,13 +194,17 @@ def parse_fred_csv(text: str) -> pd.DataFrame:
     return df.dropna().reset_index(drop=True)
 
 
-def fred(series: str) -> pd.DataFrame:
+def fred(series: str, days: int = 400) -> pd.DataFrame:
+    """days일 전부터. 경제지표처럼 긴 역사가 필요하면 days를 크게."""
     if MOCK:
         h = mock_history(series)
-        return pd.DataFrame({"date": h["date"], "value": (h["close"] / h["close"].iloc[0] * 3).round(2)})
+        out = pd.DataFrame({"date": h["date"], "value": (h["close"] / h["close"].iloc[0] * 3).round(2)})
+        if days > 1000:      # 경제지표처럼 긴 기간은 월별로
+            out["date"] = pd.date_range(end=pd.Timestamp.today().normalize(), periods=len(out), freq="MS")
+        return out
     try:
         r = session.get("https://fred.stlouisfed.org/graph/fredgraph.csv",
-                        params={"id": series, "cosd": (pd.Timestamp.today() - pd.Timedelta(days=200)).strftime("%Y-%m-%d")})
+                        params={"id": series, "cosd": (pd.Timestamp.today() - pd.Timedelta(days=days)).strftime("%Y-%m-%d")})
         return parse_fred_csv(r.text) if r.ok else pd.DataFrame(columns=["date", "value"])
     except Exception:
         return pd.DataFrame(columns=["date", "value"])
@@ -190,23 +212,26 @@ def fred(series: str) -> pd.DataFrame:
 
 # ─────────────────────────── 네이버(한국) ───────────────────────────
 def parse_fchart(text: str) -> pd.DataFrame:
-    """네이버 fchart XML → date, close. item 형식: 날짜|시가|고가|저가|종가|거래량"""
+    """네이버 fchart XML → date, open, high, low, close, volume. item 형식: 날짜|시가|고가|저가|종가|거래량"""
     rows = []
     for item in re.findall(r'<item\s+data="([^"]+)"', text):
         p = item.split("|")
         if len(p) >= 5:
-            rows.append((p[0], p[4]))
+            rows.append((p + ["0"])[:6])
     df = pd.DataFrame(rows, columns=COLUMNS)
     if df.empty:
         return empty()
     df["date"] = pd.to_datetime(df["date"], format="%Y%m%d", errors="coerce")
-    df["close"] = pd.to_numeric(df["close"], errors="coerce")
-    df = df.dropna()
+    for k in COLUMNS[1:]:
+        df[k] = pd.to_numeric(df[k], errors="coerce")
+    df = df.dropna(subset=["date", "close"])
+    df[["open", "high", "low"]] = df[["open", "high", "low"]].apply(lambda x: x.where(x > 0, df["close"]))
+    df["volume"] = df["volume"].fillna(0)
     df = df[df["close"] > 0]
     return df.sort_values("date").drop_duplicates("date", keep="last").reset_index(drop=True)
 
 
-def naver(code: str, count: int = 150) -> pd.DataFrame:
+def naver(code: str, count: int = 500) -> pd.DataFrame:
     """종목코드(005930) 또는 KOSPI·KOSDAQ."""
     if MOCK:
         return mock_history(code, count)

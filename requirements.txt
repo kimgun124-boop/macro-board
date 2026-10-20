@@ -2,3 +2,5 @@ streamlit>=1.40
 pandas
 requests
 yfinance
+plotly>=5.20
+anthropic>=1.10

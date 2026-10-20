@@ -10,9 +10,13 @@ import view
 st.set_page_config(page_title="매크로 시황 보드", page_icon="🌍", layout="wide")
 
 TABS = [
+    ("🧭 오늘의 판단", view.tab_today),
+    ("📈 차트 보드", view.tab_charts),
+    ("🔗 이슈 ↔ 섹터", view.tab_issues),
     ("📊 지수·금리·위험", view.tab_markets),
     ("🏭 섹터·대장주", view.tab_sectors),
     ("📰 사실 필터 뉴스", view.tab_news),
+    ("📅 경제지표", view.tab_econ),
 ]
 
 
@@ -31,4 +35,4 @@ view.header(snap)
 for tab, (_, draw) in zip(st.tabs([name for name, _ in TABS]), TABS):
     with tab:
         draw(snap)
-st.caption("숫자와 사실만 모았어요. 전망·추천은 넣지 않아요. 15분마다 새로 받아요.")
+st.caption("숫자는 사실, 판단·AI 해설은 해석이에요(투자 권유 아님). 시세는 15분마다 새로 받아요.")

@@ -18,6 +18,7 @@ import pandas as pd
 
 import config as C
 import sources as S
+import trend as T
 
 
 def all_yahoo() -> list[str]:
@@ -58,6 +59,7 @@ def summarize(df: pd.DataFrame | None) -> dict | None:
         "last": last, "date": pd.Timestamp(df["date"].iloc[-1]),
         "d1": pct(1), "d5": pct(5), "d20": pct(20),
         "a1": last - back(1) if back(1) is not None else None,          # 금리용 절대 변화(%p)
+        "a5": last - back(5) if back(5) is not None else None,
         "a20": last - back(20) if back(20) is not None else None,
         "ma50": ma50, "above50": (last > ma50) if ma50 else None,
         "spark": c.tail(60).round(4).tolist(),
@@ -101,6 +103,7 @@ def fred_summary(df: pd.DataFrame) -> dict | None:
     v = df["value"].astype(float).reset_index(drop=True)
     last = float(v.iloc[-1])
     return {"last": last, "date": pd.Timestamp(df["date"].iloc[-1]), "a1": last - float(v.iloc[-2]),
+            "a5": last - float(v.iloc[-6]) if len(v) > 5 else None,
             "a20": last - float(v.iloc[-21]) if len(v) > 20 else None, "spark": v.tail(60).round(3).tolist()}
 
 
@@ -196,6 +199,7 @@ def cluster(items: list[dict], thr: float = 0.34) -> list[dict]:
         out.append({
             "title": lead["title"], "url": lead["url"], "when": lead["when"], "status": status,
             "sources": sorted(g["sources"]), "n": len(g["sources"]),
+            "major": sorted(g["sources"] & C.MAJOR_PRESS), "titles": [i["title"] for i in g["items"]],
             "has_number": bool(re.search(r"\d", lead["title"])),
             "others": [{"title": i["title"], "source": i["source"], "url": i["url"]} for i in g["items"] if i is not lead][:5],
         })
@@ -221,6 +225,11 @@ MOCK_NEWS = [
     ("S&P 500 gains 0.4% as chipmakers rebound", "AP News"),
     ("Oil could hit $120 if Hormuz stays closed, analysts say", "CNBC"),
     ("Houthis claim attack on Saudi Aramco facility", "Reuters"),
+    ("Brent crude jumps 3% after Iran tanker seizure in Strait of Hormuz", "The Wall Street Journal"),
+    ("Oil jumps 3% after Iran seizes tanker near Strait of Hormuz", "Bloomberg"),
+    ("Treasury yields climb as Fed officials push back on December rate cut", "The New York Times"),
+    ("Treasury yields rise as Fed officials push back on rate cut bets", "Financial Times"),
+    ("Nvidia and memory chip stocks rally on data center capex plans", "CNBC"),
     ("코스피 1.76% 오른 5,768 마감…기관 순매수", "연합뉴스"),
 ]
 
@@ -278,7 +287,16 @@ def snapshot() -> dict:
         elif b:
             sm[key] = {**b, "d1": None, "d5": None, "d20": None, "above50": None, "ma50": None}
             ver[key] = ("단일출처", "FRED")
-    return {"at": S.now_kst(), "sm": sm, "ver": ver, "fred": fred, "news": fetch_news()}
+    tr = {t: T.metrics(df) for t, df in prices.items()}
+    for i in C.INDICES:          # 야후 한국 지수가 비면 네이버 것으로
+        if i.get("naver") and not tr.get(i["yf"]):
+            tr[i["yf"]] = tr.get("naver:" + i["naver"])
+            if "naver:" + i["naver"] in prices:
+                prices.setdefault(i["yf"], prices["naver:" + i["naver"]])
+    tail = {t: (df["close"].astype(float).pct_change().tail(5) * 100).round(2).tolist()
+            for t, df in prices.items() if t in ("^IXIC", "^GSPC") and len(df) > 6}
+    return {"at": S.now_kst(), "sm": sm, "ver": ver, "fred": fred, "news": fetch_news(),
+            "px": prices, "trend": tr, "prices_tail": tail}
 
 
 def key_of(m: dict) -> str:

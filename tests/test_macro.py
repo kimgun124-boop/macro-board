@@ -2,8 +2,12 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
+import ai
+import econ
+import issues
 import macro
 import sources
+import trend
 
 
 def test_verify():
@@ -56,4 +60,43 @@ def test_app_runs():
     from streamlit.testing.v1 import AppTest
     at = AppTest.from_file("../app.py", default_timeout=60).run()
     assert not at.exception
-    assert len(at.tabs) == 3
+    assert len(at.tabs) == 7
+
+
+def test_trend_stages():
+    up = pd.DataFrame({"date": pd.bdate_range("2025-01-01", periods=260), "close": [100 + i for i in range(260)]})
+    t = trend.metrics(up)
+    assert t["stage"] == "상승 추세" and t["above"][200]
+    down = up.assign(close=up["close"][::-1].values)
+    assert trend.metrics(down)["stage"] == "하락 추세"
+    snap = macro.snapshot()
+    v = trend.market_view(snap)
+    assert v["verdict"] and v["lines"]
+
+
+def test_issues_mock():
+    snap = macro.snapshot()
+    out = issues.build(snap)
+    oil = next(x for x in out if x["key"] == "oil")
+    assert oil["news"] and oil["links"]
+    assert any(n.get("major") for n in oil["news"])
+
+
+def test_econ():
+    df = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=30, freq="MS"), "value": [100 * 1.01 ** i for i in range(30)]})
+    y = econ.transform(df, "yoy")
+    assert abs(y["value"].iloc[-1] - (1.01 ** 12 - 1) * 100) < 1e-6
+    assert econ._rule_date(pd.Timestamp("2026-09-01"), "jobs") == pd.Timestamp("2026-10-02")
+    snap = macro.snapshot()
+    e = next(x for x in __import__("config").ECON if x["id"] == "CPIAUCSL")
+    rel = econ.releases(e, econ.fetch_series()["CPIAUCSL"], snap["px"])
+    assert rel["rows"] and "^GSPC" in rel["rows"][0]["react"]
+    assert econ.reaction_stats(rel["rows"])
+
+
+def test_ai_without_key(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    snap = macro.snapshot()
+    ctx = ai.market_context(snap, trend.market_view(snap), issues.build(snap), trend.rate_regime(snap["sm"]))
+    assert "S&P 500" in ctx
+    assert ai.ask(ctx, "test")["error"]
