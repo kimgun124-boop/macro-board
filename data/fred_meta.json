@@ -1,10 +1,14 @@
 {
- "at": "2026-10-20T07:32:13Z",
+ "at": "2026-10-20T07:36:25Z",
  "src": {
-  "CPIAUCSL": "DBnomics(BLS)",
-  "CPILFESL": "DBnomics(BLS)",
-  "PAYEMS": "DBnomics(BLS)",
-  "UNRATE": "DBnomics(BLS)",
+  "CPIAUCSL": "노동통계국(BLS)",
+  "CPILFESL": "노동통계국(BLS)",
+  "PCEPILFE": "경제분석국(BEA)",
+  "PAYEMS": "노동통계국(BLS)",
+  "UNRATE": "노동통계국(BLS)",
+  "INDPRO": "연준 G.17",
+  "A191RL1Q225SBEA": "경제분석국(BEA)",
+  "DFF": "뉴욕연은",
   "UMCSENT": "미시간대",
   "MORTGAGE30US": "프레디맥",
   "T10YIE": "미 재무부",
@@ -16,12 +20,8 @@
   "DGS30": "미 재무부"
  },
  "missing": [
-  "PCEPILFE",
   "ICSA",
   "RSAFS",
-  "INDPRO",
-  "A191RL1Q225SBEA",
-  "DFF",
   "BAMLH0A0HYM2",
   "BAMLC0A4CBBB"
  ]
