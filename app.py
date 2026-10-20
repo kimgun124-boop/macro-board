@@ -3,11 +3,24 @@
 새 화면을 넣고 싶으면 view.py에 tab_무엇() 함수를 만들고 아래 TABS에 한 줄 추가하면 돼요.
 디자인은 밸류체인 신고가 보드(very)의 theme.py를 그대로 써요.
 """
+import time
+
 import streamlit as st
 
-import macro
-import theme
-import view
+try:
+    import macro
+    import theme
+    import view
+except KeyError:
+    # 저장소가 바뀐 직후 스트림릿이 바뀐 파일을 다시 읽는 순간과 겹치면 가끔 KeyError가 나요.
+    # 잠깐 쉬었다 다시 실행하면 풀려요. 세 번 넘게 나면 앱 관리 화면에서 Reboot을 눌러야 해요.
+    n = st.session_state.get("_import_retry", 0)
+    if n < 3:
+        st.session_state["_import_retry"] = n + 1
+        time.sleep(1.5)
+        st.rerun()
+    st.error("코드를 새로 불러오는 중에 문제가 생겼어요. 오른쪽 아래 'Manage app' → ⋮ → 'Reboot app'을 눌러 주세요.")
+    st.stop()
 
 st.set_page_config(page_title="매크로 시황 보드", page_icon="🌍", layout="wide")
 
