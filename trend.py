@@ -11,6 +11,7 @@ from __future__ import annotations
 import pandas as pd
 
 import config as C
+import sources as S
 
 MAS = (10, 20, 50, 200)
 
@@ -222,8 +223,8 @@ def chart_read(df: pd.DataFrame | None, bench: pd.DataFrame | None = None, bench
     rel = None
     j = None
     if bench is not None and len(bench) > 61:
-        a = df[["date", "close"]].assign(date=pd.to_datetime(df["date"]).dt.normalize())
-        b = bench[["date", "close"]].assign(date=pd.to_datetime(bench["date"]).dt.normalize())
+        a = df[["date", "close"]].assign(date=S.day(df["date"]))
+        b = bench[["date", "close"]].assign(date=S.day(bench["date"]))
         j = a.merge(b, on="date", suffixes=("", "_b")).astype({"close": float, "close_b": float})
     if j is not None and len(j) > 61:
         x, b = j["close"], j["close_b"]

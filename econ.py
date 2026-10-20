@@ -83,7 +83,7 @@ def _ret_on(px: pd.DataFrame | None, day: pd.Timestamp, after: bool, absolute: b
     if px is None or len(px) < 3:
         return None
     d = px[["date", "close"]].copy()
-    d["date"] = pd.to_datetime(d["date"]).dt.normalize()
+    d["date"] = S.day(d["date"])
     d = d.reset_index(drop=True)
     idx = d.index[d["date"] > day] if after else d.index[d["date"] >= day]
     if not len(idx):

@@ -36,7 +36,7 @@ def fetch_long() -> dict[str, pd.DataFrame]:
 
 def returns(df: pd.DataFrame) -> pd.DataFrame:
     d = df[["date", "close"]].copy()
-    d["date"] = pd.to_datetime(d["date"]).dt.normalize()
+    d["date"] = S.day(d["date"])
     d = d.sort_values("date").drop_duplicates("date")
     d["ret"] = d["close"].astype(float).pct_change() * 100
     return d.dropna().reset_index(drop=True)
@@ -46,6 +46,7 @@ def align(base: pd.DataFrame, tgt: pd.DataFrame, lag: bool) -> pd.DataFrame:
     """대상 날짜마다 기준 등락을 붙여요. lag=True면 대상 날짜보다 '앞선' 가장 최근 기준 거래일(전날 밤 미국)."""
     a, b = returns(base)[["date", "ret"]], returns(tgt)[["date", "ret"]]
     if lag:
+        a, b = a.assign(date=S.day(a["date"])), b.assign(date=S.day(b["date"]))
         m = pd.merge_asof(b.rename(columns={"ret": "tgt"}), a.rename(columns={"ret": "base", "date": "bdate"}),
                           left_on="date", right_on="bdate", allow_exact_matches=False, direction="backward")
         m = m[(m["date"] - m["bdate"]).dt.days <= 4]           # 연휴로 너무 벌어진 날은 빼요

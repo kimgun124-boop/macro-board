@@ -78,6 +78,20 @@ def empty() -> pd.DataFrame:
     return pd.DataFrame(columns=COLUMNS)
 
 
+def day(x):
+    """날짜를 '시간대 없음 · 나노초(ns) 단위 · 자정'으로 맞춰요.
+    출처마다 단위가 달라(야후 ns, 네이버·CSV us) 날짜를 맞춰 붙이는 merge_asof가 MergeError로 멈추는 걸 막아요."""
+    d = pd.to_datetime(x, errors="coerce")
+    if isinstance(d, pd.Series):
+        if d.dt.tz is not None:
+            d = d.dt.tz_localize(None)
+        return d.dt.normalize().astype("datetime64[ns]")
+    d = pd.DatetimeIndex(d)
+    if d.tz is not None:
+        d = d.tz_localize(None)
+    return d.normalize().as_unit("ns")
+
+
 # ─────────────────────────── 가짜 데이터(MACRO_MOCK=1) ───────────────────────────
 # 연습용 가짜 시세의 시작값(금리·VIX·유가·환율은 실제와 비슷한 크기로)
 MOCK_BASE = {"^TNX": 4.6, "^FVX": 4.3, "^TYX": 4.9, "^VIX": 19.0, "CL=F": 90.0, "BZ=F": 95.0, "KRW=X": 1390.0,
@@ -97,7 +111,7 @@ def mock_history(code: str, count: int = 300) -> pd.DataFrame:
         hi, lo = max(o, price) * (1 + abs(rng.gauss(0, .006))), min(o, price) * (1 - abs(rng.gauss(0, .006)))
         rows.append((round(o, 2), round(hi, 2), round(lo, 2), round(price, 2), int(rng.uniform(1e5, 1e7))))
     df = pd.DataFrame(rows, columns=COLUMNS[1:])
-    df.insert(0, "date", dates)
+    df.insert(0, "date", day(dates))
     return df
 
 
@@ -106,9 +120,7 @@ def normalize_yf(hist: pd.DataFrame) -> pd.DataFrame:
     """yfinance 결과 → date, open, high, low, close, volume."""
     if hist is None or hist.empty or "Close" not in hist:
         return empty()
-    idx = pd.DatetimeIndex(hist.index)
-    if idx.tz is not None:
-        idx = idx.tz_localize(None)
+    idx = day(hist.index)
 
     def col(name):
         if name not in hist:
@@ -119,7 +131,7 @@ def normalize_yf(hist: pd.DataFrame) -> pd.DataFrame:
         return pd.to_numeric(v, errors="coerce").values
 
     close = col("Close")
-    df = pd.DataFrame({"date": idx.normalize(), "close": close})
+    df = pd.DataFrame({"date": idx, "close": close})
     for k in ("open", "high", "low"):
         v = col(k.capitalize())
         df[k] = close if v is None else v
@@ -435,14 +447,14 @@ def fred(series: str, days: int = 400) -> pd.DataFrame:
         out = pd.DataFrame({"date": h["date"], "value": (h["close"] / h["close"].iloc[0] * 3).round(2)})
         if days > 1000:      # 경제지표처럼 긴 기간은 월별로
             out["date"] = pd.date_range(end=pd.Timestamp.today().normalize(), periods=len(out), freq="MS")
-        return out
+        return out.assign(date=day(out["date"]))
     start = (pd.Timestamp.today() - pd.Timedelta(days=days)).strftime("%Y-%m-%d")
     for name, fn in (("FRED", _fredgraph), ("FRED API", _fred_api), ("DBnomics(BLS)", _dbnomics),
                      ("미 재무부", _treasury), (ORIGIN.get(series, ("발표 기관",))[0], _origin), ("야후", _yahoo_rate)):
         df = fn(series, start)
         if not df.empty:
             mark(f"경제지표 {series}", True, name)
-            return df
+            return df.assign(date=day(df["date"]))
     mark(f"경제지표 {series}", False, "FRED·대체 출처 모두 실패")
     return EMPTY_FRED
 
@@ -458,7 +470,7 @@ def parse_fchart(text: str) -> pd.DataFrame:
     df = pd.DataFrame(rows, columns=COLUMNS)
     if df.empty:
         return empty()
-    df["date"] = pd.to_datetime(df["date"], format="%Y%m%d", errors="coerce")
+    df["date"] = day(pd.to_datetime(df["date"], format="%Y%m%d", errors="coerce"))
     for k in COLUMNS[1:]:
         df[k] = pd.to_numeric(df[k], errors="coerce")
     df = df.dropna(subset=["date", "close"])

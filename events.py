@@ -9,6 +9,7 @@ from __future__ import annotations
 import pandas as pd
 
 import econ
+import sources as S
 
 FOMC = [pd.Timestamp(d) for d in (
     "2025-01-29", "2025-03-19", "2025-05-07", "2025-06-18", "2025-07-30", "2025-09-17", "2025-10-29", "2025-12-10",
@@ -100,7 +101,7 @@ def expiry_reaction(px: dict, today: pd.Timestamp, n: int = 12) -> dict | None:
     if df is None or len(df) < 60:
         return None
     d = df[["date", "close"]].copy()
-    d["date"] = pd.to_datetime(d["date"]).dt.normalize()
+    d["date"] = S.day(d["date"])
     d["r"] = d["close"].astype(float).pct_change() * 100
     d = d.dropna()
     days = []

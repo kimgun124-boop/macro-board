@@ -12,6 +12,7 @@ import pandas as pd
 
 import alloc
 import config as C
+import sources as S
 
 # 이름 → 종목코드(한국) 또는 야후 티커. 목록에 없으면 6자리 코드나 미국 티커를 그대로 적으면 돼요.
 NAMES = {n: c for c, n, _ in C.KR_LEADERS} | {
@@ -75,7 +76,7 @@ def _series(df: pd.DataFrame | None) -> pd.Series | None:
     if df is None or len(df) < 30:
         return None
     d = df[["date", "close"]].copy()
-    d["date"] = pd.to_datetime(d["date"]).dt.normalize()
+    d["date"] = S.day(d["date"])
     return d.drop_duplicates("date", keep="last").set_index("date")["close"].astype(float).sort_index()
 
 
@@ -84,6 +85,7 @@ def _beta(ret: pd.Series, factor: pd.Series, kr: bool) -> tuple[float | None, in
     a = ret.dropna().rename("y").reset_index()
     b = factor.dropna().rename("x").reset_index()
     a.columns, b.columns = ["date", "y"], ["bdate", "x"]
+    a["date"], b["bdate"] = S.day(a["date"]), S.day(b["bdate"])      # 출처마다 다른 날짜 단위를 맞춰야 merge_asof가 돼요
     if a.empty or b.empty:
         return None, 0
     m = pd.merge_asof(a.sort_values("date"), b.sort_values("bdate"), left_on="date", right_on="bdate",

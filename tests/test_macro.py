@@ -187,3 +187,31 @@ def test_portfolio_events_analog():
     assert res["코스피"] and res["코스피"]["n"] >= 0
     ch = alloc.changes(alloc.history(snap))
     assert ch and "d5" in ch
+
+
+def test_mixed_date_units():
+    """야후(ns)·네이버(us)처럼 날짜 단위가 달라도 날짜 맞춰 붙이기(merge_asof)가 멈추지 않아야 해요(배포에서 난 MergeError)."""
+    import corr
+    import portfolio
+    d = pd.bdate_range("2025-01-01", periods=300)
+    kr = pd.DataFrame({"date": d.as_unit("us"), "close": [100 + (i % 7) for i in range(300)]})
+    us = pd.DataFrame({"date": d.as_unit("ns"), "close": [4 + (i % 5) / 100 for i in range(300)]})
+    assert portfolio._series(kr).index.dtype == "datetime64[ns]"
+    ret = kr.set_index(pd.DatetimeIndex(kr["date"]))["close"].pct_change() * 100
+    beta, n = portfolio._beta(ret, us.set_index("date")["close"].diff() * 100, kr=True)
+    assert n > 60
+    assert not corr.align(us, kr, lag=True).empty
+    assert sources.parse_fchart('<item data="20260102|1|2|1|1.5|10" />')["date"].dtype == "datetime64[ns]"
+
+
+def test_tab_error_stays_in_tab(monkeypatch):
+    """탭 하나가 실패해도 앱 전체는 그려져야 해요."""
+    import view
+    from streamlit.testing.v1 import AppTest
+
+    def boom(snap):
+        raise ValueError("test")
+    monkeypatch.setattr(view, "tab_account", boom)
+    at = AppTest.from_file("../app.py", default_timeout=60).run()
+    assert len(at.tabs) == 11
+    assert any("내 계좌" in e.value for e in at.error)

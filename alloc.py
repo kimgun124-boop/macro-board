@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 import config as C
+import sources as S
 
 # (하한 점수, 이름, 주식 비중, 색, 한 줄)
 BANDS = [
@@ -108,7 +109,7 @@ def _close(px: dict, *keys) -> pd.Series | None:
         df = px.get(k)
         if df is not None and len(df) >= 30:
             d = df[["date", "close"]].copy()
-            d["date"] = pd.to_datetime(d["date"]).dt.normalize()
+            d["date"] = S.day(d["date"])
             s = d.drop_duplicates("date", keep="last").set_index("date")["close"].astype(float).sort_index()
             return s
     return None
@@ -368,7 +369,7 @@ def history(snap: dict, dgs10: pd.DataFrame | None = None) -> pd.DataFrame:
     ten = _tnx(px)
     if dgs10 is not None and len(dgs10) > 30:
         d = dgs10.copy()
-        d["date"] = pd.to_datetime(d["date"]).dt.normalize()
+        d["date"] = S.day(d["date"])
         ten = d.drop_duplicates("date", keep="last").set_index("date")["value"].astype(float).sort_index()
     if ten is not None:
         t = al(ten)

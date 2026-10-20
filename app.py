@@ -58,8 +58,14 @@ st.markdown(f'<div class="status">{snap["at"]:%m/%d %H:%M} 기준 · 시세 15�
             unsafe_allow_html=True)
 view.header(snap)
 with st.container(key="main_tabs"):
-    for tab, (_, draw) in zip(st.tabs([name for name, _ in TABS]), TABS):
+    for tab, (name, draw) in zip(st.tabs([name for name, _ in TABS]), TABS):
         with tab:
-            draw(snap)
+            try:
+                draw(snap)
+            except Exception as e:      # 탭 하나가 실패해도 나머지 탭과 앱은 그대로 보이게
+                st.error(f"{name} 화면을 그리다 문제가 생겼어요({type(e).__name__}). 다른 탭은 그대로 볼 수 있어요. "
+                         "새로고침해도 계속되면 이 화면을 캡처해 알려 주세요.")
+                with st.expander("자세한 오류"):
+                    st.exception(e)
 view.data_status()
 st.caption("숫자는 사실, 판단·해석 글은 해석이에요(투자 권유 아님).")
