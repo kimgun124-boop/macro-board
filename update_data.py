@@ -23,28 +23,43 @@ SERIES = ([(e["id"], 365 * 12) for e in C.ECON] + [(f["id"], 1100) for f in C.FR
 
 PROBE = {
     "FRED csv": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=UNRATE",
-    "BLS API v1": "https://api.bls.gov/publicAPI/v1/timeseries/data/LNS14000000",
-    "Fed G.17(산업생산)": "https://www.federalreserve.gov/releases/g17/ipdisk/ip_sa.txt",
-    "Census(소매판매)": "https://api.census.gov/data/timeseries/eits/marts?get=cell_value,time_slot_id&category_code=44X72"
-                       "&data_type_code=SM&seasonally_adj=yes&time=from+2025",
-    "BEA NIPA(월)": "https://apps.bea.gov/national/Release/TXT/NipaDataM.txt",
-    "노동부(실업수당)": "https://oui.doleta.gov/unemploy/csv/ar539.csv",
-    "DBnomics": "https://api.db.nomics.world/v22/series/BLS/ln/LNS14000000?observations=1",
-    "뉴욕연은": "https://markets.newyorkfed.org/api/rates/unsecured/effr/last/5.json",
-    "프레디맥": "https://www.freddiemac.com/pmms/docs/PMMS_history.csv",
-    "미시간대": "https://www.sca.isr.umich.edu/files/tbmics.csv",
+    "뉴욕연은 search": "https://markets.newyorkfed.org/api/rates/unsecured/effr/search.json?startDate=2014-01-01&endDate=2026-12-31",
+    "뉴욕연은 last1000": "https://markets.newyorkfed.org/api/rates/unsecured/effr/last/1000.json",
+    "뉴욕연은 last2500": "https://markets.newyorkfed.org/api/rates/unsecured/effr/last/2500.json",
+    "Census export": "https://www.census.gov/econ/currentdata/export/csv?programCode=MARTS&timeSlotType=12&startYear=2024"
+                     "&endYear=2026&categories[]=44X72&dataType=SM&geoLevel=US&adjusted=1&notAdjusted=0&errorData=0",
+    "노동부 claims.asp": "https://oui.doleta.gov/unemploy/claims.asp",
 }
 
 
 def probe() -> None:
+    import re
     for name, url in PROBE.items():
         try:
-            r = S.session.get(url, timeout=20, stream=True)
-            head = next(r.iter_content(160), b"").decode("utf-8", "replace").replace("\n", " ")[:120]
-            print(f"{name:20s} {r.status_code}  {head}")
-            r.close()
+            r = S.session.get(url, timeout=30)
+            text = r.text
+            if "claims.asp" in url:
+                forms = re.findall(r"<form[^>]*>", text, re.I)
+                fields = re.findall(r"<(?:input|select|option)[^>]*>", text, re.I)
+                print(f"{name}: {r.status_code} {forms}")
+                print("   " + " | ".join(fields[:80]))
+                continue
+            print(f"{name:20s} {r.status_code}  {text[:400]!r}")
         except Exception as e:
             print(f"{name:20s} 실패  {e.__class__.__name__}: {str(e)[:100]}")
+    for kind, codes in (("M", ("DPCCRG", "DPCERG")), ("Q", ("A191RL",))):
+        try:
+            text = S.session.get(f"https://apps.bea.gov/national/Release/TXT/NipaData{kind}.txt", timeout=60).text
+            for c in codes:
+                lines = [l for l in text.splitlines() if l.startswith(c + ",")]
+                print(f"BEA {kind} {c}: {len(lines)}줄 · 끝 {lines[-3:]}")
+        except Exception as e:
+            print(f"BEA {kind} 실패 {e}")
+    try:
+        text = S.session.get("https://www.federalreserve.gov/releases/g17/ipdisk/ip_sa.txt", timeout=30).text
+        print("G17 B50001 끝:", [l for l in text.splitlines() if l.startswith('"B50001"')][-2:])
+    except Exception as e:
+        print(f"G17 실패 {e}")
 
 
 def main() -> int:
