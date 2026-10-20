@@ -559,6 +559,7 @@ def parse_marts(content: bytes) -> pd.DataFrame:
     """속보 표 1: 합계 줄의 마지막 다섯 숫자 = 계절조정(이번 달 속보, 전달, 전전달, 1년 전 두 달). 앞의 세 달만 써요."""
     ws = _xlsx(content).worksheets[0]
     year = m0 = None
+    prev = ""
     for row in ws.iter_rows(values_only=True):
         cells = [c for c in row if c is not None and str(c).strip() != ""]
         if year is None:
@@ -570,7 +571,8 @@ def parse_marts(content: bytes) -> pd.DataFrame:
             m0 = _MON[mons[0]] if mons else None
             continue
         label = " ".join(str(c) for c in cells if isinstance(c, str)).lower()
-        if "retail" in label and "food" in label and "total" in label:
+        both, prev = prev + " " + label, label             # 이름이 'Retail & food services,' / 'total …' 두 줄로 나뉘어 있어요
+        if "retail" in both and "food" in both and "total" in label:
             nums = [float(c) for c in cells if isinstance(c, (int, float))]
             if len(nums) < 5:
                 break

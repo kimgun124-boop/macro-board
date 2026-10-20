@@ -287,7 +287,9 @@ def test_census_retail_xlsx():
     ws.append(["Not Adjusted", "Adjusted2"])
     ws.append(["NAICS1", "Kind of Business", "9 Month Total", 2026, 2025, 2026, 2025])
     ws.append(["code", "% Chg.", "Sep.3", "Aug.", "Jul.", "Sep.", "Aug.", "Sep.3", "Aug.", "Jul.", "Sep.", "Aug. "])
-    ws.append([None, "Retail & food services, total", 4.1, 750000, 750707, 749221, 720000, 721000,
+    ws.append([2026, 2025, "(a)", "(p)", "(r)"])
+    ws.append([None, "Retail & food services, "])
+    ws.append(["  total ………", 6445114, 4.1, 750000, 750707, 749221, 720000, 721000,
                742500, 739900, 729915, 715000, 714000])
     buf = _io.BytesIO()
     wb.save(buf)

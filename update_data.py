@@ -28,16 +28,7 @@ PROBE = {
 
 
 def probe() -> None:
-    """FRED가 다시 열렸는지, 소매판매 속보 표를 읽는지 기록해요."""
-    try:
-        content = S.session.get("https://www.census.gov/retail/marts/www/marts_current.xlsx", timeout=60).content
-        for i, row in enumerate(S._xlsx(content).worksheets[0].iter_rows(values_only=True)):
-            cells = [c for c in row if c is not None and str(c).strip() != ""]
-            if i < 12:
-                print(f"marts {i}: {cells[:14]}")
-        print("marts 읽은 값:", S.parse_marts(content).to_dict("records"))
-    except Exception as e:
-        print(f"marts 실패 {e.__class__.__name__}: {e}")
+    """FRED가 다시 열렸는지 기록해요(열리면 FRED 값을 먼저 써요)."""
     for name, url in PROBE.items():
         try:
             r = S.session.get(url, timeout=20)
