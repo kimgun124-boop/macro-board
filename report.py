@@ -29,3 +29,17 @@ def all_reports() -> list[dict]:
 def body(text: str) -> str:
     """제목 줄은 빼고(화면이 따로 그려요) 나머지."""
     return "\n".join(l for l in text.splitlines() if not l.startswith("# ")).strip()
+
+
+def section(text: str, heading: str) -> str:
+    """'## heading' 아래부터 다음 '## '까지(없으면 빈 문자열)."""
+    out, on = [], False
+    for line in text.splitlines():
+        if line.startswith("## "):
+            if on:
+                break
+            on = line[3:].strip().startswith(heading)
+            continue
+        if on:
+            out.append(line)
+    return "\n".join(out).strip()

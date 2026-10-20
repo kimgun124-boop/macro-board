@@ -74,6 +74,18 @@ def p_hy(level: float, a20: float | None) -> int:
     return min(p, 1) if level > 5 else p
 
 
+def credit_proxy(sm: dict) -> float | None:
+    """하이일드 ETF(HYG) − 국채 ETF(IEF) 20일 등락 차이. 음수가 크면 신용 위험이 커지는 중."""
+    h, i = sm.get("HYG"), sm.get("IEF")
+    if not h or not i or h.get("d20") is None or i.get("d20") is None:
+        return None
+    return h["d20"] - i["d20"]
+
+
+def p_credit_proxy(rel: float) -> int:
+    return 6 if rel >= 1 else 5 if rel >= 0 else 3 if rel >= -1.5 else 1 if rel >= -3 else 0
+
+
 def p_panic(worst: float) -> int:
     return 7 if worst > -3 else 0
 
@@ -202,6 +214,12 @@ def signals(snap: dict, fl: dict | None = None) -> list[dict]:
         out.append(_sig("hy", "위험", "하이일드 스프레드", f'{hy["last"]:.2f}%', p, 6,
                         f'20일 {hy.get("a20") or 0:+.2f}%p · ' + ("신용 불안" if p <= 3 else "신용 안정"),
                         "20일 변화 +0.2%p 아래로" if p < 5 else None, 5 - p if p < 5 else 0))
+    elif credit_proxy(sm) is not None:
+        rel = credit_proxy(sm)
+        p = p_credit_proxy(rel)
+        out.append(_sig("hy", "위험", "신용(HYG−IEF 대체)", f"20일 {rel:+.1f}%p", p, 6,
+                        "FRED가 막혀 ETF로 대신 봐요 · " + ("신용 불안" if p <= 3 else "신용 안정"),
+                        "하이일드가 국채보다 덜 빠지기" if p < 5 else None, 5 - p if p < 5 else 0))
     else:
         out.append(_sig("hy", "위험", "하이일드 스프레드", "—", None, 6, "받지 못함"))
 

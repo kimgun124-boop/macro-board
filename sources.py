@@ -203,17 +203,21 @@ def parse_stooq(text: str) -> dict | None:
         return None
 
 
+_stooq_down = {"until": 0.0}
+
+
 def stooq(sym: str) -> dict | None:
-    if MOCK:
+    if MOCK or time.time() < _stooq_down["until"]:
         return None
     try:
-        r = session.get("https://stooq.com/q/l/", params={"s": sym, "f": "sd2t2ohlc", "h": "", "e": "csv"})
+        r = session.get("https://stooq.com/q/l/", params={"s": sym, "f": "sd2t2ohlc", "h": "", "e": "csv"}, timeout=6)
         got = parse_stooq(r.text) if r.ok else None
         if got:
             mark("stooq(교차확인)", True, "")
         return got
     except Exception as e:
-        mark("stooq(교차확인)", False, e.__class__.__name__)
+        _stooq_down["until"] = time.time() + 15 * 60     # 막혀 있으면 15분 동안은 다시 시도하지 않아요
+        mark("stooq(교차확인)", False, e.__class__.__name__ + " (15분 동안 건너뜀)")
         return None
 
 
@@ -301,41 +305,54 @@ def _dbnomics(series: str, start: str) -> pd.DataFrame:
 
 
 def parse_treasury_csv(text: str, col: str) -> pd.DataFrame:
+    """재무부 CSV에서 한 열. 명목금리 표는 '10 Yr', 실질금리 표는 '10 YR'처럼 대소문자가 달라서 맞춰 봐요."""
     df = pd.read_csv(io.StringIO(text))
-    if "Date" not in df or col not in df:
+    cols = {c.strip().lower(): c for c in df.columns}
+    if "date" not in cols or col.lower() not in cols:
         return EMPTY_FRED
-    out = pd.DataFrame({"date": pd.to_datetime(df["Date"], errors="coerce"), "value": pd.to_numeric(df[col], errors="coerce")})
+    out = pd.DataFrame({"date": pd.to_datetime(df[cols["date"]], errors="coerce"),
+                        "value": pd.to_numeric(df[cols[col.lower()]], errors="coerce")})
     return out.dropna()
 
 
-_treasury_cache: dict[int, str] = {}
+_treasury_cache: dict[tuple[int, str], str] = {}
+# 시리즈 → [(표 종류, 열)] · 두 개면 앞 − 뒤. 실질금리(TIPS)는 재무부 실질금리 표, 기대인플레(BEI) = 명목 10년 − 실질 10년
+NOMINAL, REAL = "daily_treasury_yield_curve", "daily_treasury_real_yield_curve"
+TREASURY_MAP = {k: [(NOMINAL, v)] for k, v in TREASURY.items()} | {
+    "T10Y2Y": [(NOMINAL, "10 Yr"), (NOMINAL, "2 Yr")],
+    "DFII10": [(REAL, "10 Yr")], "DFII5": [(REAL, "5 Yr")],
+    "T10YIE": [(NOMINAL, "10 Yr"), (REAL, "10 Yr")],
+}
+
+
+def _treasury_text(year: int, kind: str) -> str:
+    if (year, kind) not in _treasury_cache:
+        try:
+            r = session.get(f"https://home.treasury.gov/resource-center/data-chart-center/interest-rates/"
+                            f"daily-treasury-rates.csv/{year}/all",
+                            params={"type": kind, "field_tdr_date_value": year, "_format": "csv"}, timeout=20)
+            _treasury_cache[(year, kind)] = r.text if r.ok else ""
+        except Exception:
+            _treasury_cache[(year, kind)] = ""
+    return _treasury_cache[(year, kind)]
 
 
 def _treasury(series: str, start: str) -> pd.DataFrame:
-    """미 재무부 일별 국채금리(2·5·10·30년). 10Y−2Y도 여기서 계산."""
-    cols = {"T10Y2Y": ("10 Yr", "2 Yr")}.get(series) or ((TREASURY[series],) if series in TREASURY else None)
-    if not cols:
+    """미 재무부 일별 국채금리(명목·실질). 10Y−2Y, 기대인플레(명목−실질)도 여기서 계산."""
+    spec = TREASURY_MAP.get(series)
+    if not spec:
         return EMPTY_FRED
     frames = []
     for y in range(max(int(start[:4]), now_kst().year - 2), now_kst().year + 1):
-        if y not in _treasury_cache:
-            try:
-                r = session.get(f"https://home.treasury.gov/resource-center/data-chart-center/interest-rates/"
-                                f"daily-treasury-rates.csv/{y}/all",
-                                params={"type": "daily_treasury_yield_curve", "field_tdr_date_value": y, "_format": "csv"},
-                                timeout=20)
-                _treasury_cache[y] = r.text if r.ok else ""
-            except Exception:
-                _treasury_cache[y] = ""
-        text = _treasury_cache[y]
-        if not text:
+        parts = [parse_treasury_csv(_treasury_text(y, kind), col) if _treasury_text(y, kind) else EMPTY_FRED
+                 for kind, col in spec]
+        if any(p.empty for p in parts):
             continue
-        if len(cols) == 2:
-            a, b = parse_treasury_csv(text, cols[0]), parse_treasury_csv(text, cols[1])
-            m = a.merge(b, on="date")
-            frames.append(pd.DataFrame({"date": m["date"], "value": m["value_x"] - m["value_y"]}))
+        if len(parts) == 2:
+            m = parts[0].merge(parts[1], on="date")
+            frames.append(pd.DataFrame({"date": m["date"], "value": (m["value_x"] - m["value_y"]).round(3)}))
         else:
-            frames.append(parse_treasury_csv(text, cols[0]))
+            frames.append(parts[0])
     if not frames:
         return EMPTY_FRED
     df = pd.concat(frames).sort_values("date").drop_duplicates("date").reset_index(drop=True)

@@ -10,6 +10,7 @@ import ai
 import alloc
 import charts
 import corr
+import digest
 import flows
 import report
 import config as C
@@ -103,6 +104,22 @@ CSS = """
 .st-key-rep_body table{width:100%;font-size:.88rem;font-variant-numeric:tabular-nums}
 .st-key-rep_body th{background:#F7F7FB;color:var(--sub);font-weight:600}
 .st-key-rep_body li, .st-key-rep_body p{font-size:.92rem;line-height:1.65}
+.dg .dg-h, .dg-h{font-weight:800;font-size:.98rem;margin:0 0 6px;display:flex;justify-content:space-between;gap:8px}
+.dg-h span{font-weight:400;font-size:.76rem;color:var(--sub)}
+.dg-row{display:flex;gap:10px;padding:7px 0;border-top:1px solid var(--line2)}
+.dg-row:first-of-type{border-top:none}
+.dg-row a{color:var(--ink);font-weight:700;text-decoration:none}
+.dg-no{color:var(--pri);font-size:1.05rem;min-width:1.1rem}
+.dg-tp{display:inline-block;font-size:.72rem;font-weight:700;color:var(--pri-ink);background:var(--pri-soft);border-radius:6px;padding:0 6px;margin-right:6px}
+.dg-m{font-size:.76rem;color:var(--sub)}
+.dg-ko{margin-top:3px}
+.dg-ko span{display:inline-block;font-size:.72rem;color:#374151;background:#F3F4F8;border-radius:6px;padding:0 6px;margin:0 4px 2px 0}
+.dg-card .dg-t{font-size:.86rem;font-weight:700;line-height:1.4;margin:4px 0 2px}
+.dg-card .dg-t a{color:var(--ink);text-decoration:none}
+.dg-mv{font-size:.76rem;color:#374151;margin-top:4px;font-variant-numeric:tabular-nums}
+.dg-path{font-size:.74rem;color:var(--sub);margin-top:3px}
+.st-key-rep_news h2{font-size:1rem !important}
+.st-key-rep_news table{width:100%;font-size:.86rem}
 .al-cap{margin-top:.45rem;font-size:.84rem;font-weight:700;color:#A2343B;background:#FBE9EA;border-radius:8px;padding:.35rem .6rem}
 .al-split-t{font-size:.86rem;font-weight:800;color:var(--ink);margin:2px 0 6px}
 .al-split{display:flex;height:34px;border-radius:10px;overflow:hidden;font-size:.86rem;font-weight:800;color:#fff}
@@ -274,7 +291,18 @@ def tab_markets(snap: dict) -> None:
     for f in C.FRED:
         s = fred.get(f["id"])
         rows.append([f["group"], f["name"], f'{s["last"]:.2f}%' if s else "—", _pp(s and s["a1"]), _pp(s and s.get("a20")),
-                     f'{s["date"]:%m/%d}' if s else "—", "§" + f["read"] + " (FRED)"])
+                     f'{s["date"]:%m/%d}' if s else "—",
+                     "§" + f["read"] + (" (FRED)" if s else " · 못 받음: FRED 접속이 막혀요. Secrets에 FRED_API_KEY를 넣으면 받아요")])
+    # FRED가 막히면 ETF로 신용 위험을 대신 봐요(하이일드·투자등급 회사채 ETF vs 국채 ETF)
+    ief = sm.get("IEF")
+    for sym, name, fid in (("HYG", "하이일드", "BAMLH0A0HYM2"), ("LQD", "투자등급(BBB 근처)", "BAMLC0A4CBBB")):
+        e = sm.get(sym)
+        if fred.get(fid) or not e or not ief or e["d20"] is None or ief["d20"] is None:
+            continue
+        rel1 = None if e["d1"] is None or ief["d1"] is None else e["d1"] - ief["d1"]
+        rows.append(["신용(대체)", f"{name} ETF − 국채 ETF ({sym}−IEF)", f'{e["d20"] - ief["d20"]:+.2f}%p (20일)', _pp(rel1),
+                     _p(e["d20"]), f'{e["date"]:%m/%d}',
+                     "§FRED 스프레드를 못 받아서 ETF로 대신 봐요. 음수가 커지면 회사채가 국채보다 약함 = 신용 위험이 커지는 중"])
     rsp, spy = sm.get("RSP"), sm.get("SPY")
     if rsp and spy and rsp["d20"] is not None and spy["d20"] is not None:
         rows.append(["시장 폭", "동일가중 − 시총가중 (20일)", f'{rsp["d20"] - spy["d20"]:+.2f}%p', _p(rsp["d1"]), _p(rsp["d20"]),
@@ -315,6 +343,10 @@ def tab_sectors(snap: dict) -> None:
 
 def tab_news(snap: dict) -> None:
     news = snap.get("news") or []
+    _sec("지금 뉴스 요약", "새 뉴스가 들어오면 15분마다 다시 정리 · 영어 제목엔 한국어 핵심어")
+    _claude_news()
+    _digest_block(digest.build(snap), cards=9, items=0)
+    _sec("전체 뉴스", "사실 라벨로 거르기")
     pick = _seg("보기", ["사실만(교차확인·단일출처)", "교차확인만", "주장·의견까지 전부"], key="mc_news")
     allow = {"사실만(교차확인·단일출처)": ("교차확인", "단일출처"), "교차확인만": ("교차확인",),
              "주장·의견까지 전부": ("교차확인", "단일출처", "주장", "의견")}[pick]
@@ -655,13 +687,63 @@ def tab_econ(snap: dict) -> None:
 
 
 # ═══════════════════════════ 세계 시황 해석(첫 탭) ═══════════════════════════
-def _news_cards(items: list[dict], n: int = 6) -> None:
-    for nw in items[:n]:
-        maj = f' · <b>주요 외신</b> {html.escape(", ".join(nw["major"]))}' if nw.get("major") else ""
-        when = nw["when"].astimezone(S.KST).strftime("%m/%d %H:%M") if nw.get("when") else ""
-        st.markdown(f'<div class="mc-news">{_chip(nw["status"])} <span class="m">{when}</span>'
-                    f'<div class="h"><a href="{html.escape(nw["url"])}" target="_blank">{html.escape(nw["title"])}</a></div>'
-                    f'<div class="m">{html.escape(", ".join(nw["sources"]))}{maj}</div></div>', unsafe_allow_html=True)
+def _gist_chips(n: dict) -> str:
+    if not n.get("ko"):
+        return ""
+    return '<div class="dg-ko">' + "".join(f"<span>{html.escape(w)}</span>" for w in n["ko"]) + "</div>"
+
+
+def _claude_news() -> None:
+    """Claude가 쓴 최신 해석 글의 '## 뉴스 해석' 부분."""
+    reps = report.all_reports()
+    if not reps:
+        return
+    sec = report.section(reps[0]["text"], "뉴스 해석")
+    if sec:
+        with st.container(border=True, key="rep_news"):
+            st.markdown(f'<div class="dg-h">🧠 Claude 뉴스 해석 <span>{reps[0]["when"]} · 매일 오전 8시·밤 8시</span></div>',
+                        unsafe_allow_html=True)
+            st.markdown(sec)
+
+
+def _digest_block(d: dict, cards: int = 8, items: int = 12) -> None:
+    """핵심 뉴스 → 새로 뜬 뉴스 → 주제별 카드 → 목록."""
+    if not d["news"]:
+        st.caption("지난 24시간 관련 뉴스가 없어요.")
+        return
+    if d.get("lines"):
+        st.markdown('<div class="mc-sum">' + "".join(f"<div>· {html.escape(x)}</div>" for x in d["lines"]) + "</div>",
+                    unsafe_allow_html=True)
+    rows = []
+    for i, n in enumerate(d["top"], 1):
+        when = n["when"].astimezone(S.KST).strftime("%m/%d %H:%M") if n.get("when") else ""
+        rows.append(f'<div class="dg-row"><b class="dg-no">{i}</b><div><span class="dg-tp">{html.escape(digest.NAMES[n["topic"]])}</span>'
+                    f'<a href="{html.escape(n["url"])}" target="_blank">{html.escape(n["title"])}</a>'
+                    f'<span class="dg-m"> · {n["n"]}곳 보도{" · 주요 외신 " + html.escape(", ".join(n["major"][:3])) if n.get("major") else ""} · {when}</span>'
+                    f'{_gist_chips(n)}</div></div>')
+    st.markdown('<div class="mc-card dg"><div class="dg-h">지금 가장 크게 보도된 뉴스 5 <span>언론사 수·주요 외신·최신순</span></div>'
+                + "".join(rows) + "</div>", unsafe_allow_html=True)
+    if d["new"]:
+        st.markdown('<div class="mc-legend"><b>🆕 최근 3시간 새로 뜬 뉴스</b> · ' + " · ".join(
+            f'<a href="{html.escape(n["url"])}" target="_blank">{html.escape(n["title"])}</a> ({n["n"]}곳)' for n in d["new"]) + "</div>",
+            unsafe_allow_html=True)
+    tops = d["topics"][:cards]
+    st.markdown('<div class="idx-row" style="grid-template-columns:repeat(auto-fill,minmax(240px,1fr))">' + "".join(
+        f'<div class="idx dg-card"><div class="idx-name"><b>{html.escape(t["name"])}</b> <small>{t["n"]}건 · 교차확인 {t["n_cross"]}</small></div>'
+        f'<div class="dg-t"><a href="{html.escape(t["news"][0]["url"])}" target="_blank">{html.escape(t["news"][0]["title"])}</a></div>'
+        f'{_gist_chips(t["news"][0])}'
+        + (f'<div class="dg-mv">{" · ".join(f"{html.escape(a)} 5일 {html.escape(b)}" for a, b in t["moves"])}</div>' if t["moves"] else "")
+        + (f'<div class="dg-path">{html.escape(t["path"])}</div>' if t["path"] else "") + "</div>" for t in tops) + "</div>",
+        unsafe_allow_html=True)
+    if not items:
+        return
+    with st.expander(f"뉴스 목록 {len(d['news'])}건 (주제·중요도 순)"):
+        for n in sorted(d["news"], key=lambda n: (digest.FACT.count(n["status"]) == 0, -n["w"]))[:items]:
+            when = n["when"].astimezone(S.KST).strftime("%m/%d %H:%M") if n.get("when") else ""
+            st.markdown(f'<div class="mc-news">{_chip(n["status"])} <span class="dg-tp">{html.escape(digest.NAMES[n["topic"]])}</span>'
+                        f'<span class="m">{when}</span><div class="h"><a href="{html.escape(n["url"])}" target="_blank">'
+                        f'{html.escape(n["title"])}</a></div>{_gist_chips(n)}'
+                        f'<div class="m">{html.escape(", ".join(n["sources"][:8]))}</div></div>', unsafe_allow_html=True)
 
 
 def tab_world(snap: dict) -> None:
@@ -706,13 +788,8 @@ def tab_world(snap: dict) -> None:
                      "—" if l["ok"] is None else ("✔" if l["ok"] else "✘")] for l in oil["links"]]
             st.markdown(_table(["섹터·지표", "가설", "5일", "맞음"], rows), unsafe_allow_html=True)
 
-    _sec("전쟁 · 지정학 · 유가 뉴스", "외신 우선, 사실 라벨")
-    geo = sorted({id(n): n for k in ("oil", "defense") if k in iss for n in iss[k]["news"]}.values(),
-                 key=lambda n: ({"교차확인": 0, "단일출처": 1, "주장": 2, "의견": 3}[n["status"]], -len(n.get("major", []))))
-    if geo:
-        _news_cards(geo, 8)
-    else:
-        st.caption("지난 24시간 관련 뉴스가 없어요.")
+    _sec("전쟁 · 지정학 · 유가 뉴스 요약", "새 뉴스가 들어오면 15분마다 다시 정리")
+    _digest_block(digest.build(snap, only=digest.GEO_KEYS), cards=5, items=20)
 
     _sec("세계 지수 한눈에", "1일 · 5일 등락")
     c1, c2 = st.columns(2)

@@ -147,3 +147,19 @@ def test_alloc():
     h = alloc.history(snap)
     assert not h.empty and h["score"].between(0, 100).all()
     assert alloc.band_stats(h)
+
+
+def test_digest_and_treasury():
+    import digest
+    assert digest.topic_of("Oil wavers near five-month high as Iran's Hormuz threats vie with flows") == "iran"
+    assert digest.gist("Canada's inflation ticks up to 3.1% due to high oil prices") == ["캐나다", "물가", "유가", "상승"]
+    assert "5개월 고점" in digest.gist("Brent crude holds near five-month high")
+    assert digest.gist("코스피 5700선 탈환") == []
+    d = digest.build(macro.snapshot())
+    assert d["top"] and d["topics"]
+    g = digest.build(macro.snapshot(), only=digest.GEO_KEYS)
+    assert all(n["topic"] in digest.GEO_KEYS for n in g["news"]) and g["lines"]
+    real = sources.parse_treasury_csv("Date,5 YR,7 YR,10 YR,20 YR,30 YR\n10/16/2026,1.50,1.70,1.92,2.10,2.20\n", "10 Yr")
+    assert real["value"].iloc[0] == 1.92
+    import report
+    assert report.section("# t\n## 뉴스 해석\n| a |\n## 다음\nx", "뉴스 해석") == "| a |"

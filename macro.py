@@ -24,7 +24,7 @@ import trend as T
 def all_yahoo() -> list[str]:
     t = [i["yf"] for i in C.INDICES] + [m["yf"] for m in C.MACRO if m["yf"]] + [v["yf"] for v in C.VOL]
     t += [s for s, _ in C.SECTORS] + [s for s, _ in C.THEMES]
-    t += [s for v in C.LEADERS.values() for s, _ in v]
+    t += [s for v in C.LEADERS.values() for s, _ in v] + [s for s, _ in C.CREDIT]
     return list(dict.fromkeys(t))
 
 
@@ -231,6 +231,10 @@ MOCK_NEWS = [
     ("Treasury yields rise as Fed officials push back on rate cut bets", "Financial Times"),
     ("Nvidia and memory chip stocks rally on data center capex plans", "CNBC"),
     ("코스피 1.76% 오른 5,768 마감…기관 순매수", "연합뉴스"),
+    ("Saudi Arabia Postpones Its FII Investment Event After Houthi Attacks", "Financial Times"),
+    ("Saudi Arabia postpones FII investment event after Houthi attacks", "The New York Times"),
+    ("Canada's inflation ticks up to 3.1% due to high oil prices", "Reuters"),
+    ("Iran's Main Oil Terminals Remain Empty as US Blockade Bites", "Bloomberg"),
 ]
 
 
