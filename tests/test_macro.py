@@ -262,3 +262,35 @@ def test_dol_claims_xml():
            '<SA>&#160;</SA></InitialClaims></week></r539cyNational>')
     d = sources.parse_dol(xml)
     assert list(d["value"]) == [226000] and d["date"].iloc[0] == pd.Timestamp("2026-10-04")
+
+
+def test_census_retail_xlsx():
+    import io as _io
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "2026"
+    ws.append(["Estimates of Monthly Retail and Food Services Sales by Kind of Business: 2026"])
+    ws.append(["NAICS  Code", "Kind of Business"])
+    ws.append(["", "", "Jan. 2026", "Feb. 2026", "Mar. 2026(p)", "CY CUM"])
+    ws.append(["", "NOT ADJUSTED"])
+    ws.append(["", "Retail and food services sales, total", 640890, 625789, 727278, 1])
+    ws.append(["", "ADJUSTED(2)"])
+    ws.append(["", "Retail and food services sales, total", 701860, 707959, 719700, ""])
+    buf = _io.BytesIO()
+    wb.save(buf)
+    h = sources.parse_mrts(buf.getvalue(), 2020)
+    assert list(h["value"]) == [701860, 707959, 719700] and h["date"].iloc[-1] == pd.Timestamp("2026-03-01")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Table 1.  Estimated Monthly Sales for Retail and Food Services, by Kind of Business"])
+    ws.append(["Not Adjusted", "Adjusted2"])
+    ws.append(["NAICS1", "Kind of Business", "9 Month Total", 2026, 2025, 2026, 2025])
+    ws.append(["code", "% Chg.", "Sep.3", "Aug.", "Jul.", "Sep.", "Aug.", "Sep.3", "Aug.", "Jul.", "Sep.", "Aug. "])
+    ws.append([None, "Retail & food services, total", 4.1, 750000, 750707, 749221, 720000, 721000,
+               742500, 739900, 729915, 715000, 714000])
+    buf = _io.BytesIO()
+    wb.save(buf)
+    m = sources.parse_marts(buf.getvalue())
+    assert list(m["date"]) == [pd.Timestamp("2026-07-01"), pd.Timestamp("2026-08-01"), pd.Timestamp("2026-09-01")]
+    assert list(m["value"]) == [729915, 739900, 742500]

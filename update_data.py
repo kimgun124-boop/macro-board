@@ -21,27 +21,20 @@ import sources as S
 SERIES = ([(e["id"], 365 * 12) for e in C.ECON] + [(f["id"], 1100) for f in C.FRED]
           + [(m["fred"], 1100) for m in C.MACRO if m.get("fred")])
 
-PROBE = ["https://www.census.gov/retail/mrts/www/mrtssales92-present.xlsx",
-         "https://www.census.gov/retail/marts/www/marts_current.xlsx"]
+PROBE = {
+    "FRED csv": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=UNRATE",
+    "FRED API": "https://api.stlouisfed.org/fred/series/observations?series_id=UNRATE&file_type=json",
+}
 
 
 def probe() -> None:
-    import io as _io
-    import openpyxl
-    for url in PROBE:
+    """FRED가 다시 열렸는지만 기록해요(열리면 FRED 값을 먼저 써요)."""
+    for name, url in PROBE.items():
         try:
-            r = S.session.get(url, timeout=60)
-            wb = openpyxl.load_workbook(_io.BytesIO(r.content), read_only=True, data_only=True)
-            print(f"{url}: {r.status_code} {len(r.content)}B 시트 {wb.sheetnames[:6]}")
-            ws = wb[wb.sheetnames[0]]
-            for i, row in enumerate(ws.iter_rows(values_only=True)):
-                cells = [c for c in row if c is not None]
-                if i < 8 or (cells and any(isinstance(c, str) and ("retail and food" in c.lower() or "adjusted" in c.lower()) for c in cells)):
-                    print(f"  {i}: {cells[:16]}")
-                if i > 120:
-                    break
+            r = S.session.get(url, timeout=20)
+            print(f"{name:10s} {r.status_code}  {r.text[:120]!r}")
         except Exception as e:
-            print(f"{url} 실패 {e.__class__.__name__}: {e}")
+            print(f"{name:10s} 실패  {e.__class__.__name__}")
 
 
 def main() -> int:

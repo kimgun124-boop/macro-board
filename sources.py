@@ -521,12 +521,82 @@ def _dol(start: str) -> pd.DataFrame:
     return parse_dol(r.text)
 
 
+# 인구조사국(Census) 소매판매 엑셀: 지난 기록(mrtssales92-present, 연도별 시트) + 가장 최근 속보치(marts_current)
+_MON = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
+_RETAIL_TOTAL = re.compile(r"retail\s*(?:and|&)\s*food\s*services(?:\s*sales)?,?\s*total", re.I)
+_MON_YEAR = re.compile(r"^([A-Za-z]{3})\.?\s*(\d{4})")
+
+
+def _xlsx(content: bytes):
+    import openpyxl      # 깃허브 자동 받기에서만 설치해요(앱은 저장소 파일을 읽어서 필요 없음)
+    return openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+
+
+def parse_mrts(content: bytes, start_year: int = 2000) -> pd.DataFrame:
+    """연도 시트마다 'ADJUSTED' 아래 'Retail and food services sales, total' 줄(계절조정, 백만 달러)."""
+    wb, out = _xlsx(content), []
+    for name in wb.sheetnames:
+        if not name.strip().isdigit() or int(name) < start_year:
+            continue
+        head, adj = None, False
+        for row in wb[name].iter_rows(values_only=True):
+            texts = ["" if c is None else str(c).strip() for c in row]
+            if head is None and any(_MON_YEAR.match(x) for x in texts):
+                head = texts
+            elif any(x.upper().startswith("ADJUSTED") for x in texts):
+                adj = True
+            elif adj and head and any(_RETAIL_TOTAL.search(x) for x in texts):
+                for h, v in zip(head, row):
+                    m = _MON_YEAR.match(h)
+                    if m and m.group(1).lower() in _MON and isinstance(v, (int, float)):
+                        out.append((pd.Timestamp(int(m.group(2)), _MON[m.group(1).lower()], 1), float(v)))
+                break
+    df = pd.DataFrame(out, columns=["date", "value"])
+    return df.drop_duplicates("date").sort_values("date").reset_index(drop=True)
+
+
+def parse_marts(content: bytes) -> pd.DataFrame:
+    """속보 표 1: 합계 줄의 마지막 다섯 숫자 = 계절조정(이번 달 속보, 전달, 전전달, 1년 전 두 달). 앞의 세 달만 써요."""
+    ws = _xlsx(content).worksheets[0]
+    year = m0 = None
+    for row in ws.iter_rows(values_only=True):
+        cells = [c for c in row if c is not None and str(c).strip() != ""]
+        if year is None:
+            years = [c for c in cells if isinstance(c, int) and 1990 < c < 2100]
+            year = years[0] if years else None
+            continue
+        if m0 is None:
+            mons = [str(c).strip()[:3].lower() for c in cells if str(c).strip()[:3].lower() in _MON]
+            m0 = _MON[mons[0]] if mons else None
+            continue
+        if any(isinstance(c, str) and _RETAIL_TOTAL.search(c) for c in cells):
+            nums = [float(c) for c in cells if isinstance(c, (int, float))]
+            if len(nums) < 5:
+                break
+            d0 = pd.Timestamp(year, m0, 1)
+            return pd.DataFrame({"date": [d0 - pd.DateOffset(months=k) for k in (2, 1, 0)], "value": nums[-5:-2][::-1]})
+    return EMPTY_FRED
+
+
+def _census_retail(start: str) -> pd.DataFrame:
+    get = lambda u: session.get(u, timeout=60).content
+    hist = parse_mrts(get("https://www.census.gov/retail/mrts/www/mrtssales92-present.xlsx"), int(start[:4]))
+    try:
+        new = parse_marts(get("https://www.census.gov/retail/marts/www/marts_current.xlsx"))
+    except Exception:
+        new = EMPTY_FRED
+    if not new.empty and new["value"].between(1e5, 5e6).all():      # 속보치가 지난 기록보다 최신이면 덮어써요
+        hist = pd.concat([hist[~hist["date"].isin(new["date"])], new]).sort_values("date").reset_index(drop=True)
+    return hist
+
+
 # FRED가 막힐 때 원래 발표 기관에서 직접 받는 곳: 시리즈 → (출처 이름, 받는 함수(start) → date·value)
 ORIGIN = {
     "DFF": ("뉴욕연은", _nyfed),
     "MORTGAGE30US": ("프레디맥", lambda start: parse_freddie(_text("https://www.freddiemac.com/pmms/docs/PMMS_history.csv"))),
     "UMCSENT": ("미시간대", lambda start: parse_umich(_text("https://www.sca.isr.umich.edu/files/tbmics.csv"))),
     "ICSA": ("노동부(DOL)", _dol),
+    "RSAFS": ("인구조사국(Census)", _census_retail),
     "INDPRO": ("연준 G.17", lambda start: parse_g17(_text("https://www.federalreserve.gov/releases/g17/ipdisk/ip_sa.txt"))),
 } | {k: ("노동통계국(BLS)", _bls(k)) for k in BLS} | {k: ("경제분석국(BEA)", _bea(k)) for k in BEA}
 
