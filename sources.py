@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import os
 import random
 import re
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pandas as pd
 import requests
@@ -429,6 +431,62 @@ def _origin(series: str, start: str) -> pd.DataFrame:
         return EMPTY_FRED
 
 
+# ─────────── 저장소 파일(GitHub Actions가 하루 두 번 update_data.py로 받아 둔 값) ───────────
+DATA_DIR = Path(__file__).resolve().parent / "data"
+REPO_FRESH_DAYS = 4                     # 이보다 오래된 파일이면 실시간 출처를 먼저 시도해요
+FRED_SRC: dict[str, str] = {}           # 시리즈 → 실제로 받은 출처 이름
+_repo_cache: dict[str, tuple[float, object]] = {}
+
+
+def _repo_read(name: str, reader):
+    f = DATA_DIR / name
+    try:
+        mt = f.stat().st_mtime
+    except OSError:
+        return None
+    if name not in _repo_cache or _repo_cache[name][0] != mt:
+        try:
+            _repo_cache[name] = (mt, reader(f))
+        except Exception:
+            _repo_cache[name] = (mt, None)
+    return _repo_cache[name][1]
+
+
+def repo_fred() -> pd.DataFrame:
+    """data/fred.csv → id, date, value (없으면 빈 표)."""
+    def read(f):
+        df = pd.read_csv(f, dtype={"id": str})
+        df["date"] = day(df["date"])
+        df["value"] = pd.to_numeric(df["value"], errors="coerce")
+        return df.dropna()
+    df = _repo_read("fred.csv", read)
+    return df if df is not None else pd.DataFrame(columns=["id", "date", "value"])
+
+
+def repo_meta() -> dict:
+    """{'at': 받은 시각(UTC), 'src': {시리즈: 원출처}, 'missing': [...], 'age': 지난 일수}."""
+    m = _repo_read("fred_meta.json", lambda f: json.loads(f.read_text()))
+    if not m:
+        return {}
+    at = pd.Timestamp(m.get("at")).tz_convert(KST) if m.get("at") else None
+    return {**m, "at_kst": at, "age": (pd.Timestamp.now(tz=KST) - at).total_seconds() / 86400 if at is not None else None}
+
+
+def _repo(series: str, start: str) -> pd.DataFrame:
+    df = repo_fred()
+    if df.empty:
+        return EMPTY_FRED
+    d = df[(df["id"] == series) & (df["date"] >= start)][["date", "value"]]
+    return d.sort_values("date").reset_index(drop=True)
+
+
+def _repo_name(series: str) -> str:
+    m = repo_meta()
+    orig = m.get("src", {}).get(series, "")
+    when = f'{m["at_kst"]:%m/%d %H:%M}' if m.get("at_kst") is not None else ""
+    return f"저장소 파일({when} 받음{', 원출처 ' + orig if orig else ''})"
+
+
 def _yahoo_rate(series: str, start: str) -> pd.DataFrame:
     t = YAHOO_RATE.get(series)
     if not t:
@@ -440,8 +498,10 @@ def _yahoo_rate(series: str, start: str) -> pd.DataFrame:
     return df[df["date"] >= start].reset_index(drop=True)
 
 
-def fred(series: str, days: int = 400) -> pd.DataFrame:
-    """FRED 시리즈(date, value). FRED가 막히면 FRED API(키) → DBnomics(BLS) → 미 재무부 → 발표 기관(뉴욕연은·프레디맥·미시간대) → 야후 순서로 대신 받아요."""
+def fred(series: str, days: int = 400, use_repo: bool = True) -> pd.DataFrame:
+    """FRED 시리즈(date, value).
+    순서: 저장소 파일(깃허브가 하루 두 번 받아 둔 값, 4일 안이면) → FRED → FRED API(키) → DBnomics(BLS) → 미 재무부
+    → 발표 기관(뉴욕연은·프레디맥·미시간대) → 야후 → 오래된 저장소 파일."""
     if MOCK:
         h = mock_history(series)
         out = pd.DataFrame({"date": h["date"], "value": (h["close"] / h["close"].iloc[0] * 3).round(2)})
@@ -449,12 +509,26 @@ def fred(series: str, days: int = 400) -> pd.DataFrame:
             out["date"] = pd.date_range(end=pd.Timestamp.today().normalize(), periods=len(out), freq="MS")
         return out.assign(date=day(out["date"]))
     start = (pd.Timestamp.today() - pd.Timedelta(days=days)).strftime("%Y-%m-%d")
+    age = repo_meta().get("age") if use_repo else None
+    if age is not None and age <= REPO_FRESH_DAYS:
+        df = _repo(series, start)
+        if not df.empty:
+            FRED_SRC[series] = _repo_name(series)
+            mark(f"경제지표 {series}", True, FRED_SRC[series])
+            return df
     for name, fn in (("FRED", _fredgraph), ("FRED API", _fred_api), ("DBnomics(BLS)", _dbnomics),
                      ("미 재무부", _treasury), (ORIGIN.get(series, ("발표 기관",))[0], _origin), ("야후", _yahoo_rate)):
         df = fn(series, start)
         if not df.empty:
+            FRED_SRC[series] = name
             mark(f"경제지표 {series}", True, name)
             return df.assign(date=day(df["date"]))
+    if use_repo:
+        df = _repo(series, start)
+        if not df.empty:
+            FRED_SRC[series] = _repo_name(series) + " · 오래된 값"
+            mark(f"경제지표 {series}", True, FRED_SRC[series])
+            return df
     mark(f"경제지표 {series}", False, "FRED·대체 출처 모두 실패")
     return EMPTY_FRED
 

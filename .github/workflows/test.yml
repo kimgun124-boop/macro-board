@@ -2,6 +2,7 @@ name: 테스트
 
 on:
   push:
+    paths-ignore: ["data/**", "reports/**"]
   pull_request:
 
 jobs:

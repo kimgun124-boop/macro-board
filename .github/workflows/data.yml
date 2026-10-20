@@ -1,0 +1,40 @@
+name: 경제지표 받기
+
+# 스트림릿 서버에서는 FRED가 막혀서, 깃허브 서버에서 하루 두 번 받아 data/fred.csv로 저장소에 넣어요.
+# 앱은 이 파일을 먼저 읽어요. (FRED_API_KEY 비밀값이 있으면 그것도 써요. 없어도 돼요.)
+on:
+  schedule:
+    - cron: "20 22 * * *"   # 한국 07:20 (아침 해석 글 전)
+    - cron: "0 14 * * *"    # 한국 23:00 (미국 지표 발표 08:30 ET 뒤)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: 대체 출처가 열리는지 확인(기록용)
+        run: python update_data.py --probe
+        continue-on-error: true
+      - name: 지표 받기
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+        run: python update_data.py
+      - name: 저장소에 올리기
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --cached --quiet; then echo "바뀐 값 없음"; exit 0; fi
+          git commit -m "경제지표 자료 갱신 $(date -u +%Y-%m-%dT%H:%MZ)"
+          git pull --rebase origin main
+          git push
