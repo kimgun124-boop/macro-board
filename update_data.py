@@ -21,41 +21,25 @@ import sources as S
 SERIES = ([(e["id"], 365 * 12) for e in C.ECON] + [(f["id"], 1100) for f in C.FRED]
           + [(m["fred"], 1100) for m in C.MACRO if m.get("fred")])
 
-CENSUS = "programCode=MARTS&startYear=2024&endYear=2026&dataType=SM&geoLevel=US&adjusted=1&notAdjusted=0&errorData=0"
-PROBE = {
-    "Census dbsearch": f"https://www.census.gov/econ/currentdata/dbsearch?{CENSUS}&categories[]=44X72",
-    "Census export2": f"https://www.census.gov/econ/currentdata/export/csv?{CENSUS}&timeSlotType=12&categories=44X72",
-    "Census export3": f"https://www.census.gov/econ/currentdata/export/csv?{CENSUS}&timeSlotType=12&categories%5B%5D=44X72",
-    "Census api": "https://api.census.gov/data/timeseries/eits/marts?get=cell_value,time_slot_id,category_code,data_type_code"
-                  "&time=2026&category_code=44X72&data_type_code=SM&seasonally_adj=yes",
-    "Census retail": "https://www.census.gov/retail/index.html",
-}
+PROBE = ["https://www.census.gov/retail/sales.html", "https://www.census.gov/retail/marts/www/timeseries.html",
+         "https://www.census.gov/retail/index.html"]
 
 
 def probe() -> None:
     import re
-    for name, url in PROBE.items():
+    for url in PROBE:
         try:
             r = S.session.get(url, timeout=30)
-            text = r.text
-            if name == "Census retail":
-                print(f"{name}: {r.status_code}", sorted(set(re.findall(r'href="([^"]+\.(?:xlsx?|csv|txt))"', text)))[:40])
-                continue
-            if name == "Census dbsearch":
-                i = text.find("<table")
-                print(f"{name}: {r.status_code} forms={re.findall(r'<a[^>]+export[^>]*>', text)[:5]} table={text[i:i+900]!r}")
-                continue
-            print(f"{name:20s} {r.status_code}  {text[:500]!r}")
+            links = sorted(set(re.findall(r'href="([^"]*(?:marts|xls|csv|timeseries)[^"]*)"', r.text, re.I)))
+            print(f"{url}: {r.status_code} {links[:60]}")
         except Exception as e:
-            print(f"{name:20s} 실패  {e.__class__.__name__}: {str(e)[:100]}")
-    for ft in ("xml", "xls"):
-        try:
-            r = S.session.post("https://oui.doleta.gov/unemploy/wkclaims/report.asp", timeout=60,
-                               data={"level": "us", "final_yr": "2027", "strtdate": "2025", "enddate": "2026",
-                                     "filetype": ft, "submit": "Submit"})
-            print(f"노동부 {ft}: {r.status_code} {r.headers.get('content-type')} {r.text[:900]!r} … {r.text[-600:]!r}")
-        except Exception as e:
-            print(f"노동부 {ft} 실패 {e}")
+            print(f"{url} 실패 {e}")
+    try:
+        r = S.session.get("https://api.stlouisfed.org/fred/series/observations",
+                          params={"series_id": "RSAFS", "api_key": "0" * 32, "file_type": "json"}, timeout=30)
+        print(f"FRED API(가짜 키): {r.status_code} {r.text[:200]!r}")
+    except Exception as e:
+        print(f"FRED API 실패 {e.__class__.__name__}: {str(e)[:100]}")
 
 
 def main() -> int:

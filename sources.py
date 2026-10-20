@@ -502,11 +502,31 @@ def parse_g17(text: str, code: str = "B50001") -> pd.DataFrame:
     return df.dropna().sort_values("date").reset_index(drop=True)
 
 
+def parse_dol(text: str) -> pd.DataFrame:
+    """노동부 주간 실업수당 XML(r539cyNational): 주마다 weekEnded와 신규 청구(계절조정 SA)."""
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(text.encode("utf-8") if isinstance(text, str) else text)
+    rows = [(w.findtext("weekEnded"), w.findtext("InitialClaims/SA")) for w in root.iter("week")]
+    df = pd.DataFrame(rows, columns=["date", "value"])
+    df["date"] = pd.to_datetime(df["date"], format="%m/%d/%Y", errors="coerce")
+    df["value"] = pd.to_numeric(df["value"].str.replace(",", "").str.strip(), errors="coerce")
+    return df.dropna().sort_values("date").reset_index(drop=True)
+
+
+def _dol(start: str) -> pd.DataFrame:
+    r = session.post("https://oui.doleta.gov/unemploy/wkclaims/report.asp", timeout=60,
+                     data={"level": "us", "final_yr": str(now_kst().year + 1), "strtdate": start[:4],
+                           "enddate": str(now_kst().year), "filetype": "xml", "submit": "Submit"})
+    r.raise_for_status()
+    return parse_dol(r.text)
+
+
 # FRED가 막힐 때 원래 발표 기관에서 직접 받는 곳: 시리즈 → (출처 이름, 받는 함수(start) → date·value)
 ORIGIN = {
     "DFF": ("뉴욕연은", _nyfed),
     "MORTGAGE30US": ("프레디맥", lambda start: parse_freddie(_text("https://www.freddiemac.com/pmms/docs/PMMS_history.csv"))),
     "UMCSENT": ("미시간대", lambda start: parse_umich(_text("https://www.sca.isr.umich.edu/files/tbmics.csv"))),
+    "ICSA": ("노동부(DOL)", _dol),
     "INDPRO": ("연준 G.17", lambda start: parse_g17(_text("https://www.federalreserve.gov/releases/g17/ipdisk/ip_sa.txt"))),
 } | {k: ("노동통계국(BLS)", _bls(k)) for k in BLS} | {k: ("경제분석국(BEA)", _bea(k)) for k in BEA}
 

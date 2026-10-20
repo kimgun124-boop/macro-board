@@ -254,3 +254,11 @@ def test_origin_parsers():
     assert list(g["value"]) == [103.1, 103.4, 103.0] and g["date"].iloc[-1] == pd.Timestamp("2026-03-01")
     assert not sources.fresh(pd.DataFrame({"date": [pd.Timestamp("2025-01-01")], "value": [1.0]}))
     assert sources.fresh(pd.DataFrame({"date": [pd.Timestamp.today().normalize()], "value": [1.0]}))
+
+
+def test_dol_claims_xml():
+    xml = ('<r539cyNational rundate="10/20/2026"><week><weekEnded>10/04/2026</weekEnded><InitialClaims><NSA>206,295</NSA>'
+           '<SA>226,000</SA></InitialClaims></week><week><weekEnded>10/11/2026</weekEnded><InitialClaims><NSA>&#160;</NSA>'
+           '<SA>&#160;</SA></InitialClaims></week></r539cyNational>')
+    d = sources.parse_dol(xml)
+    assert list(d["value"]) == [226000] and d["date"].iloc[0] == pd.Timestamp("2026-10-04")
