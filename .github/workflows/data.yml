@@ -21,7 +21,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt openpyxl
       - name: 대체 출처가 열리는지 확인(기록용)
         run: python update_data.py --probe
         continue-on-error: true

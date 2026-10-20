@@ -21,25 +21,27 @@ import sources as S
 SERIES = ([(e["id"], 365 * 12) for e in C.ECON] + [(f["id"], 1100) for f in C.FRED]
           + [(m["fred"], 1100) for m in C.MACRO if m.get("fred")])
 
-PROBE = ["https://www.census.gov/retail/sales.html", "https://www.census.gov/retail/marts/www/timeseries.html",
-         "https://www.census.gov/retail/index.html"]
+PROBE = ["https://www.census.gov/retail/mrts/www/mrtssales92-present.xlsx",
+         "https://www.census.gov/retail/marts/www/marts_current.xlsx"]
 
 
 def probe() -> None:
-    import re
+    import io as _io
+    import openpyxl
     for url in PROBE:
         try:
-            r = S.session.get(url, timeout=30)
-            links = sorted(set(re.findall(r'href="([^"]*(?:marts|xls|csv|timeseries)[^"]*)"', r.text, re.I)))
-            print(f"{url}: {r.status_code} {links[:60]}")
+            r = S.session.get(url, timeout=60)
+            wb = openpyxl.load_workbook(_io.BytesIO(r.content), read_only=True, data_only=True)
+            print(f"{url}: {r.status_code} {len(r.content)}B 시트 {wb.sheetnames[:6]}")
+            ws = wb[wb.sheetnames[0]]
+            for i, row in enumerate(ws.iter_rows(values_only=True)):
+                cells = [c for c in row if c is not None]
+                if i < 8 or (cells and any(isinstance(c, str) and ("retail and food" in c.lower() or "adjusted" in c.lower()) for c in cells)):
+                    print(f"  {i}: {cells[:16]}")
+                if i > 120:
+                    break
         except Exception as e:
-            print(f"{url} 실패 {e}")
-    try:
-        r = S.session.get("https://api.stlouisfed.org/fred/series/observations",
-                          params={"series_id": "RSAFS", "api_key": "0" * 32, "file_type": "json"}, timeout=30)
-        print(f"FRED API(가짜 키): {r.status_code} {r.text[:200]!r}")
-    except Exception as e:
-        print(f"FRED API 실패 {e.__class__.__name__}: {str(e)[:100]}")
+            print(f"{url} 실패 {e.__class__.__name__}: {e}")
 
 
 def main() -> int:
