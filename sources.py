@@ -409,23 +409,114 @@ def parse_umich(text: str) -> pd.DataFrame:
     return out.dropna().sort_values("date").reset_index(drop=True)
 
 
+def _text(url: str, timeout: int = 30, **kw) -> str:
+    r = session.get(url, timeout=timeout, **kw)
+    r.raise_for_status()
+    return r.text
+
+
+def _nyfed(start: str) -> pd.DataFrame:
+    end = (now_kst() + timedelta(days=1)).strftime("%Y-%m-%d")
+    for url in (f"https://markets.newyorkfed.org/api/rates/unsecured/effr/search.json?startDate={start}&endDate={end}",
+                "https://markets.newyorkfed.org/api/rates/unsecured/effr/last/1000.json"):
+        try:
+            df = parse_nyfed(session.get(url, timeout=30).json())
+            if not df.empty:
+                return df
+        except Exception:
+            continue
+    return EMPTY_FRED
+
+
+# 노동통계국(BLS) 공개 API v1: 키 없이 한 번에 10년까지
+BLS = {"CPIAUCSL": "CUSR0000SA0", "CPILFESL": "CUSR0000SA0L1E", "PAYEMS": "CES0000000001", "UNRATE": "LNS14000000"}
+
+
+def parse_bls(js: dict) -> pd.DataFrame:
+    rows = [(f'{o["year"]}-{o["period"][1:]}-01', o.get("value"))
+            for s in (js or {}).get("Results", {}).get("series", []) for o in s.get("data", [])
+            if str(o.get("period", "")).startswith("M") and o.get("period") != "M13"]
+    df = pd.DataFrame(rows, columns=["date", "value"])
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    return df.dropna().sort_values("date").reset_index(drop=True)
+
+
+def _bls(series: str):
+    def fetch(start: str) -> pd.DataFrame:
+        end = now_kst().year
+        r = session.post("https://api.bls.gov/publicAPI/v1/timeseries/data/", timeout=30,
+                         json={"seriesid": [BLS[series]], "startyear": str(max(int(start[:4]), end - 9)), "endyear": str(end)})
+        js = r.json()
+        if js.get("status") != "REQUEST_SUCCEEDED":
+            raise ValueError(" ".join(js.get("message", []))[:120] or js.get("status"))
+        return parse_bls(js)
+    return fetch
+
+
+# 경제분석국(BEA) 국민계정 전체 파일(키 없음). 근원 PCE 물가 = DPCCRG(월), 실질 GDP 성장률(연율) = A191RL(분기)
+BEA = {"PCEPILFE": ("M", "DPCCRG"), "A191RL1Q225SBEA": ("Q", "A191RL")}
+_bea_cache: dict[str, tuple[float, dict]] = {}
+
+
+def parse_bea(text: str, code: str) -> pd.DataFrame:
+    import csv
+    rows = [next(csv.reader([l]))[1:3] for l in text.splitlines() if l.startswith(code + ",")]
+    df = pd.DataFrame(rows, columns=["period", "value"])
+    if df.empty:
+        return EMPTY_FRED
+
+    def when(p: str):
+        p = p.strip()
+        if "Q" in p:
+            return pd.Period(p, freq="Q").start_time
+        return pd.Timestamp(p.replace("M", "-") + "-01") if "M" in p else pd.Timestamp(p + "-01-01")
+    out = pd.DataFrame({"date": df["period"].map(when),
+                        "value": pd.to_numeric(df["value"].str.replace(",", ""), errors="coerce")})
+    return out.dropna().sort_values("date").reset_index(drop=True)
+
+
+def _bea(series: str):
+    kind, code = BEA[series]
+
+    def fetch(start: str) -> pd.DataFrame:
+        hit = _bea_cache.get(kind)
+        if not hit or time.time() - hit[0] > 6 * 3600:      # 큰 파일이라 필요한 줄만 남겨 6시간 보관
+            text = _text(f"https://apps.bea.gov/national/Release/TXT/NipaData{kind}.txt", timeout=120)
+            hit = (time.time(), {c: parse_bea(text, c) for k, c in BEA.values() if k == kind})
+            _bea_cache[kind] = hit
+        return hit[1].get(code, EMPTY_FRED)
+    return fetch
+
+
+def parse_g17(text: str, code: str = "B50001") -> pd.DataFrame:
+    """연준 G.17 산업생산 파일(ip_sa.txt): '"B50001"  2025  103.1 103.4 …' (한 줄 = 한 해 12달)."""
+    rows = []
+    for line in text.splitlines():
+        p = line.split()
+        if len(p) > 2 and p[0] == f'"{code}"' and p[1].isdigit():
+            rows += [(f"{p[1]}-{i:02d}-01", v) for i, v in enumerate(p[2:14], 1)]
+    df = pd.DataFrame(rows, columns=["date", "value"])
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    return df.dropna().sort_values("date").reset_index(drop=True)
+
+
+# FRED가 막힐 때 원래 발표 기관에서 직접 받는 곳: 시리즈 → (출처 이름, 받는 함수(start) → date·value)
 ORIGIN = {
-    "DFF": ("뉴욕연은", "https://markets.newyorkfed.org/api/rates/unsecured/effr/last/2500.json", "json", parse_nyfed),
-    "MORTGAGE30US": ("프레디맥", "https://www.freddiemac.com/pmms/docs/PMMS_history.csv", "text", parse_freddie),
-    "UMCSENT": ("미시간대", "https://www.sca.isr.umich.edu/files/tbmics.csv", "text", parse_umich),
-}
+    "DFF": ("뉴욕연은", _nyfed),
+    "MORTGAGE30US": ("프레디맥", lambda start: parse_freddie(_text("https://www.freddiemac.com/pmms/docs/PMMS_history.csv"))),
+    "UMCSENT": ("미시간대", lambda start: parse_umich(_text("https://www.sca.isr.umich.edu/files/tbmics.csv"))),
+    "INDPRO": ("연준 G.17", lambda start: parse_g17(_text("https://www.federalreserve.gov/releases/g17/ipdisk/ip_sa.txt"))),
+} | {k: ("노동통계국(BLS)", _bls(k)) for k in BLS} | {k: ("경제분석국(BEA)", _bea(k)) for k in BEA}
 
 
 def _origin(series: str, start: str) -> pd.DataFrame:
     spec = ORIGIN.get(series)
     if not spec:
         return EMPTY_FRED
-    _, url, kind, parse = spec
     try:
-        r = session.get(url, timeout=20)
-        if not r.ok:
-            return EMPTY_FRED
-        df = parse(r.json() if kind == "json" else r.text)
+        df = spec[1](start)
         return df[df["date"] >= start].reset_index(drop=True)
     except Exception:
         return EMPTY_FRED
@@ -498,10 +589,18 @@ def _yahoo_rate(series: str, start: str) -> pd.DataFrame:
     return df[df["date"] >= start].reset_index(drop=True)
 
 
+MAX_AGE_DAYS = 300      # 마지막 값이 이보다 오래되면 '갱신이 멈춘 출처'로 봐요(분기 GDP도 넉넉히 들어오게)
+
+
+def fresh(df: pd.DataFrame) -> bool:
+    return not df.empty and (pd.Timestamp.today() - pd.Timestamp(df["date"].max())).days <= MAX_AGE_DAYS
+
+
 def fred(series: str, days: int = 400, use_repo: bool = True) -> pd.DataFrame:
     """FRED 시리즈(date, value).
-    순서: 저장소 파일(깃허브가 하루 두 번 받아 둔 값, 4일 안이면) → FRED → FRED API(키) → DBnomics(BLS) → 미 재무부
-    → 발표 기관(뉴욕연은·프레디맥·미시간대) → 야후 → 오래된 저장소 파일."""
+    순서: 저장소 파일(깃허브가 하루 두 번 받아 둔 값, 4일 안이면) → FRED → FRED API(키)
+    → 발표 기관(BLS·BEA·연준·뉴욕연은·프레디맥·미시간대) → 미 재무부 → DBnomics → 야후 → 오래된 저장소 파일.
+    마지막 값이 300일보다 오래된 결과는 버려요."""
     if MOCK:
         h = mock_history(series)
         out = pd.DataFrame({"date": h["date"], "value": (h["close"] / h["close"].iloc[0] * 3).round(2)})
@@ -512,13 +611,16 @@ def fred(series: str, days: int = 400, use_repo: bool = True) -> pd.DataFrame:
     age = repo_meta().get("age") if use_repo else None
     if age is not None and age <= REPO_FRESH_DAYS:
         df = _repo(series, start)
-        if not df.empty:
+        if fresh(df):
             FRED_SRC[series] = _repo_name(series)
             mark(f"경제지표 {series}", True, FRED_SRC[series])
             return df
-    for name, fn in (("FRED", _fredgraph), ("FRED API", _fred_api), ("DBnomics(BLS)", _dbnomics),
-                     ("미 재무부", _treasury), (ORIGIN.get(series, ("발표 기관",))[0], _origin), ("야후", _yahoo_rate)):
+    for name, fn in (("FRED", _fredgraph), ("FRED API", _fred_api), (ORIGIN.get(series, ("발표 기관",))[0], _origin),
+                     ("미 재무부", _treasury), ("DBnomics(BLS)", _dbnomics), ("야후", _yahoo_rate)):
         df = fn(series, start)
+        if not df.empty and not fresh(df):      # 갱신이 멈춘 출처(예: DBnomics의 BLS 사본)는 쓰지 않아요
+            mark(f"경제지표 {series} · {name}", False, f'마지막 값 {df["date"].max():%Y-%m-%d}로 오래돼서 건너뜀')
+            continue
         if not df.empty:
             FRED_SRC[series] = name
             mark(f"경제지표 {series}", True, name)

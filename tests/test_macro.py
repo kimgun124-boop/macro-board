@@ -215,3 +215,42 @@ def test_tab_error_stays_in_tab(monkeypatch):
     at = AppTest.from_file("../app.py", default_timeout=60).run()
     assert len(at.tabs) == 11
     assert any("내 계좌" in e.value for e in at.error)
+
+
+def test_repo_fred_file(tmp_path, monkeypatch):
+    """깃허브가 받아 둔 data/fred.csv를 먼저 읽고, 오래됐으면 실시간 출처 → 그래도 없으면 오래된 파일."""
+    import json as _json
+    monkeypatch.setattr(sources, "MOCK", False)
+    monkeypatch.setattr(sources, "DATA_DIR", tmp_path)
+    for fn in ("_fredgraph", "_fred_api", "_dbnomics", "_treasury", "_origin", "_yahoo_rate"):
+        monkeypatch.setattr(sources, fn, lambda s, start: sources.EMPTY_FRED)
+    today = pd.Timestamp.today().normalize()
+    pd.DataFrame({"id": ["UNRATE"] * 3, "date": [f"{d:%Y-%m-%d}" for d in pd.date_range(end=today, periods=3, freq="MS")],
+                  "value": [4.1, 4.2, 4.3]}).to_csv(tmp_path / "fred.csv", index=False)
+    now = pd.Timestamp.now(tz="UTC")
+    (tmp_path / "fred_meta.json").write_text(_json.dumps({"at": f"{now:%Y-%m-%dT%H:%M:%SZ}", "src": {"UNRATE": "FRED"}}))
+    df = sources.fred("UNRATE", 400)
+    assert list(df["value"]) == [4.1, 4.2, 4.3] and df["date"].dtype == "datetime64[ns]"
+    assert sources.FRED_SRC["UNRATE"].startswith("저장소 파일") and "FRED" in sources.FRED_SRC["UNRATE"]
+    old = now - pd.Timedelta(days=10)
+    (tmp_path / "fred_meta.json").write_text(_json.dumps({"at": f"{old:%Y-%m-%dT%H:%M:%SZ}", "src": {}}))
+    assert len(sources.fred("UNRATE", 400)) == 3 and "오래된" in sources.FRED_SRC["UNRATE"]
+    assert sources.fred("CPIAUCSL", 400).empty
+
+
+def test_origin_parsers():
+    """FRED가 막힐 때 쓰는 원래 발표 기관 파일들(BLS·BEA·연준 G.17)을 읽는지, 오래된 출처는 거르는지."""
+    js = {"status": "REQUEST_SUCCEEDED", "Results": {"series": [{"seriesID": "LNS14000000", "data": [
+        {"year": "2026", "period": "M09", "value": "4.4"}, {"year": "2026", "period": "M08", "value": "4.3"},
+        {"year": "2025", "period": "M13", "value": "4.1"}, {"year": "2025", "period": "M10", "value": "-"}]}]}}
+    b = sources.parse_bls(js)
+    assert list(b["value"]) == [4.3, 4.4] and b["date"].iloc[-1] == pd.Timestamp("2026-09-01")
+    text = '%SeriesCode,Period,Value\nDPCCRG,2026M07,"127.512"\nDPCCRG,2026M08,"127.861"\nDPCCRGX,2026M08,"1"\nA191RL,2026Q2,"2.1"\n'
+    m = sources.parse_bea(text, "DPCCRG")
+    assert list(m["value"]) == [127.512, 127.861] and m["date"].iloc[-1] == pd.Timestamp("2026-08-01")
+    q = sources.parse_bea(text, "A191RL")
+    assert q["date"].iloc[0] == pd.Timestamp("2026-04-01") and q["value"].iloc[0] == 2.1
+    g = sources.parse_g17('"B50001: Total index"\n"B50001"   2026   103.1  103.4  103.0\n"B50002"   2026   1 2 3\n')
+    assert list(g["value"]) == [103.1, 103.4, 103.0] and g["date"].iloc[-1] == pd.Timestamp("2026-03-01")
+    assert not sources.fresh(pd.DataFrame({"date": [pd.Timestamp("2025-01-01")], "value": [1.0]}))
+    assert sources.fresh(pd.DataFrame({"date": [pd.Timestamp.today().normalize()], "value": [1.0]}))

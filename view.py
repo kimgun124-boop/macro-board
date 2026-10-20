@@ -810,9 +810,20 @@ def tab_issues(snap: dict) -> None:
 
 
 # ═══════════════════════════ 경제지표 ═══════════════════════════
-@st.cache_data(ttl=6 * 3600, show_spinner="경제지표를 받는 중이에요…")
-def _econ_series() -> dict:
-    return econ.fetch_series()
+@st.cache_data(ttl=3600, show_spinner="경제지표를 받는 중이에요…")
+def _econ_series(ver: str) -> dict:
+    """ver = 저장소 파일을 받은 시각. 파일이 새로 들어오면 바로 다시 읽어요."""
+    series = econ.fetch_series()
+    return {"series": series, "src": {k: S.FRED_SRC.get(k, "") for k in series}}
+
+
+def _src_short(s: str) -> str:
+    if not s:
+        return "—"
+    if s.startswith("저장소 파일"):
+        orig = s.split("원출처 ")[-1].rstrip(")") if "원출처" in s else "FRED"
+        return f"{orig} (깃허브 자동 받기)" + (" · 오래됨" if "오래된" in s else "")
+    return s
 
 
 def _val(v, e) -> str:
@@ -826,17 +837,22 @@ def _val(v, e) -> str:
 
 
 def tab_econ(snap: dict) -> None:
-    series = _econ_series()
+    meta = S.repo_meta()
+    got = _econ_series(meta.get("at", ""))
+    series, src = got["series"], got["src"]
     summ = econ.summary(series)
     rows = []
     for e in C.ECON:
         s = summ.get(e["id"])
         rows.append([e["name"], _val(s and s["last"], e), _val(s and s["prev"], e),
                      f'{s["date"]:%Y-%m-%d}' if s else "—",
-                     f'{_val(s and s["y_lo"], e)} ~ {_val(s and s["y_hi"], e)}' if s else "—", "§" + html.escape(e["read"])])
+                     f'{_val(s and s["y_lo"], e)} ~ {_val(s and s["y_hi"], e)}' if s else "—",
+                     html.escape(_src_short(src.get(e["id"], ""))), "§" + html.escape(e["read"])])
     _sec("미국 경제지표 한눈에")
-    st.markdown(_table(["지표", "최근", "직전", "기준일", "1년 범위", "읽는 법"], rows), unsafe_allow_html=True)
-    st.caption("FRED(세인트루이스 연준) 자료. CPI·PCE·산업생산은 전년 대비 %, 고용은 전월 대비 증감, 소매판매는 전월 대비 %예요.")
+    st.markdown(_table(["지표", "최근", "직전", "기준일", "1년 범위", "출처", "읽는 법"], rows), unsafe_allow_html=True)
+    when = f' · 깃허브가 {meta["at_kst"]:%m/%d %H:%M}에 받아 둔 값' if meta.get("at_kst") is not None else ""
+    st.caption("CPI·PCE·산업생산은 전년 대비 %, 고용은 전월 대비 증감, 소매판매는 전월 대비 %예요. "
+               f"FRED(세인트루이스 연준)·노동통계국 등 원래 발표 숫자 그대로{when}.")
 
     _sec("지표 자세히 보기 + 발표일 각국 지수 반응")
     names = {e["name"]: e for e in C.ECON}

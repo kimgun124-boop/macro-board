@@ -21,14 +21,14 @@ import sources as S
 SERIES = ([(e["id"], 365 * 12) for e in C.ECON] + [(f["id"], 1100) for f in C.FRED]
           + [(m["fred"], 1100) for m in C.MACRO if m.get("fred")])
 
+CENSUS = "programCode=MARTS&startYear=2024&endYear=2026&dataType=SM&geoLevel=US&adjusted=1&notAdjusted=0&errorData=0"
 PROBE = {
-    "FRED csv": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=UNRATE",
-    "뉴욕연은 search": "https://markets.newyorkfed.org/api/rates/unsecured/effr/search.json?startDate=2014-01-01&endDate=2026-12-31",
-    "뉴욕연은 last1000": "https://markets.newyorkfed.org/api/rates/unsecured/effr/last/1000.json",
-    "뉴욕연은 last2500": "https://markets.newyorkfed.org/api/rates/unsecured/effr/last/2500.json",
-    "Census export": "https://www.census.gov/econ/currentdata/export/csv?programCode=MARTS&timeSlotType=12&startYear=2024"
-                     "&endYear=2026&categories[]=44X72&dataType=SM&geoLevel=US&adjusted=1&notAdjusted=0&errorData=0",
-    "노동부 claims.asp": "https://oui.doleta.gov/unemploy/claims.asp",
+    "Census dbsearch": f"https://www.census.gov/econ/currentdata/dbsearch?{CENSUS}&categories[]=44X72",
+    "Census export2": f"https://www.census.gov/econ/currentdata/export/csv?{CENSUS}&timeSlotType=12&categories=44X72",
+    "Census export3": f"https://www.census.gov/econ/currentdata/export/csv?{CENSUS}&timeSlotType=12&categories%5B%5D=44X72",
+    "Census api": "https://api.census.gov/data/timeseries/eits/marts?get=cell_value,time_slot_id,category_code,data_type_code"
+                  "&time=2026&category_code=44X72&data_type_code=SM&seasonally_adj=yes",
+    "Census retail": "https://www.census.gov/retail/index.html",
 }
 
 
@@ -38,28 +38,24 @@ def probe() -> None:
         try:
             r = S.session.get(url, timeout=30)
             text = r.text
-            if "claims.asp" in url:
-                forms = re.findall(r"<form[^>]*>", text, re.I)
-                fields = re.findall(r"<(?:input|select|option)[^>]*>", text, re.I)
-                print(f"{name}: {r.status_code} {forms}")
-                print("   " + " | ".join(fields[:80]))
+            if name == "Census retail":
+                print(f"{name}: {r.status_code}", sorted(set(re.findall(r'href="([^"]+\.(?:xlsx?|csv|txt))"', text)))[:40])
                 continue
-            print(f"{name:20s} {r.status_code}  {text[:400]!r}")
+            if name == "Census dbsearch":
+                i = text.find("<table")
+                print(f"{name}: {r.status_code} forms={re.findall(r'<a[^>]+export[^>]*>', text)[:5]} table={text[i:i+900]!r}")
+                continue
+            print(f"{name:20s} {r.status_code}  {text[:500]!r}")
         except Exception as e:
             print(f"{name:20s} 실패  {e.__class__.__name__}: {str(e)[:100]}")
-    for kind, codes in (("M", ("DPCCRG", "DPCERG")), ("Q", ("A191RL",))):
+    for ft in ("xml", "xls"):
         try:
-            text = S.session.get(f"https://apps.bea.gov/national/Release/TXT/NipaData{kind}.txt", timeout=60).text
-            for c in codes:
-                lines = [l for l in text.splitlines() if l.startswith(c + ",")]
-                print(f"BEA {kind} {c}: {len(lines)}줄 · 끝 {lines[-3:]}")
+            r = S.session.post("https://oui.doleta.gov/unemploy/wkclaims/report.asp", timeout=60,
+                               data={"level": "us", "final_yr": "2027", "strtdate": "2025", "enddate": "2026",
+                                     "filetype": ft, "submit": "Submit"})
+            print(f"노동부 {ft}: {r.status_code} {r.headers.get('content-type')} {r.text[:900]!r} … {r.text[-600:]!r}")
         except Exception as e:
-            print(f"BEA {kind} 실패 {e}")
-    try:
-        text = S.session.get("https://www.federalreserve.gov/releases/g17/ipdisk/ip_sa.txt", timeout=30).text
-        print("G17 B50001 끝:", [l for l in text.splitlines() if l.startswith('"B50001"')][-2:])
-    except Exception as e:
-        print(f"G17 실패 {e}")
+            print(f"노동부 {ft} 실패 {e}")
 
 
 def main() -> int:
@@ -80,8 +76,12 @@ def main() -> int:
         return 1
     new = pd.concat(frames)
     old = S.repo_fred()
-    if not old.empty:                      # 이번에 못 받은 시리즈는 지난 파일 값을 남겨 둬요
-        new = pd.concat([new, old[old["id"].isin(missing)]])
+    for sid in list(missing):              # 이번에 못 받은 시리즈는 지난 파일 값이 아직 새것이면 남겨 둬요
+        keep = old[old["id"] == sid]
+        if S.fresh(keep):
+            new = pd.concat([new, keep])
+            src[sid] = S.repo_meta().get("src", {}).get(sid, "").replace(" (지난 실행 값)", "") + " (지난 실행 값)"
+            print(f"… {sid}: 지난 실행 값 유지(마지막 {keep['date'].max():%Y-%m-%d})")
     new["date"] = new["date"].dt.strftime("%Y-%m-%d")
     S.DATA_DIR.mkdir(exist_ok=True)
     new.to_csv(S.DATA_DIR / "fred.csv", index=False)
