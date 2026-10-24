@@ -1,11 +1,7 @@
 {
- "at": "2026-10-24T00:51:07Z",
+ "at": "2026-10-24T17:13:12Z",
  "src": {
-  "CPIAUCSL": "노동통계국(BLS)",
-  "CPILFESL": "노동통계국(BLS)",
   "PCEPILFE": "경제분석국(BEA)",
-  "PAYEMS": "노동통계국(BLS)",
-  "UNRATE": "노동통계국(BLS)",
   "ICSA": "노동부(DOL)",
   "RSAFS": "인구조사국(Census)",
   "INDPRO": "연준 G.17",
@@ -19,9 +15,17 @@
   "DGS2": "미 재무부",
   "DGS5": "미 재무부",
   "DGS10": "미 재무부",
-  "DGS30": "미 재무부"
+  "DGS30": "미 재무부",
+  "CPIAUCSL": "노동통계국(BLS) (지난 실행 값)",
+  "CPILFESL": "노동통계국(BLS) (지난 실행 값)",
+  "PAYEMS": "노동통계국(BLS) (지난 실행 값)",
+  "UNRATE": "노동통계국(BLS) (지난 실행 값)"
  },
  "missing": [
+  "CPIAUCSL",
+  "CPILFESL",
+  "PAYEMS",
+  "UNRATE",
   "BAMLH0A0HYM2",
   "BAMLC0A4CBBB"
  ]
